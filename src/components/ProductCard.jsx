@@ -37,8 +37,8 @@ export default function ProductCard({ product }) {
     <div
       className="product-card"
       style={{
-        background: '#141414',
-        border: '1px solid #27272a',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -53,7 +53,7 @@ export default function ProductCard({ product }) {
         className="product-image-container"
         style={{
           width: '100%',
-          background: product.bg || '#1e1e1e',
+          background: product.bg || 'var(--surface2)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -164,7 +164,7 @@ export default function ProductCard({ product }) {
           style={{
             fontFamily: 'Syne',
             fontWeight: 800,
-            color: '#ffd700',
+            color: '#87CEEB',
           }}
         >
           ₹{product.price}
@@ -182,12 +182,12 @@ export default function ProductCard({ product }) {
                 color:
                   available <= 1
                     ? '#ef4444'
-                    : '#f59e0b',
+                    : '#87CEEB',
 
                 background:
                   available <= 1
                     ? '#2c1212'
-                    : '#261c0c',
+                    : 'rgba(135, 206, 235, 0.1)',
 
                 borderRadius: 6,
                 display: 'inline-block',
@@ -207,7 +207,7 @@ export default function ProductCard({ product }) {
               style={{
                 height: 4,
                 width: '100%',
-                background: '#22c55e',
+                background: '#2ecc71',
                 borderRadius: 2,
                 marginTop: 10,
               }}
@@ -238,7 +238,7 @@ export default function ProductCard({ product }) {
                 className="product-add-button"
                 style={{
                   width: '100%',
-                  background: '#ffd700',
+                  background: '#87CEEB',
                   color: '#000000',
                   border: 'none',
                   borderRadius: 8,
@@ -264,7 +264,7 @@ export default function ProductCard({ product }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: '#ffd700',
+                background: '#87CEEB',
                 borderRadius: 8,
                 width: '100%',
                 padding: '4px 0',

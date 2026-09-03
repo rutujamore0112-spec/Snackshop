@@ -6,8 +6,8 @@ import { db } from '../lib/firebase'
 import { useCart } from '../lib/CartContext'
 import { useAuth } from '../lib/AuthContext'
 
-const UPI_ID = 'abhinavmandal68@oksbi'
-const OWNER_NAME = 'Abhinav Mandal'
+const UPI_ID = 'rutujamore0112-3@oksbi'
+const OWNER_NAME = 'Rutuja More'
 const TIMER_SECONDS = 120 
 
 export default function CartDrawer({ products, open, onClose }) {
