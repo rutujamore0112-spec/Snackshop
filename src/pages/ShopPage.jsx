@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { ShoppingCart, LogOut } from 'lucide-react'
+import { ShoppingCart, LogOut, Store, DoorClosed } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { signOut } from 'firebase/auth'
-import { auth } from '../lib/firebase'
+import { doc, onSnapshot } from 'firebase/firestore'
+import { auth, db } from '../lib/firebase'
 import { useAuth } from '../lib/AuthContext'
 import { CartProvider, useCart } from '../lib/CartContext'
 import { useProducts } from '../hooks/useProducts'
@@ -19,6 +20,14 @@ function Shop() {
   const [tab, setTab] = useState('all')
   const [cartOpen, setCartOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+  const [shopOpen, setShopOpen] = useState(true)
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'shopStatus'), snap => {
+      setShopOpen(snap.exists() ? snap.data().open !== false : true)
+    }, err => console.error('Shop status error:', err))
+    return unsub
+  }, [])
 
   const filtered =
     tab === 'all'
@@ -60,8 +69,8 @@ function Shop() {
             ? '0 10px 30px rgba(0,0,0,0.5)'
             : '0 0 0px rgba(0,0,0,0)',
           backgroundColor: scrolled
-            ? 'rgba(13, 13, 13, 0.95)'
-            : 'rgba(14, 14, 14, 0.75)',
+            ? 'rgba(0, 0, 0, 0.95)'
+            : 'rgba(0, 0, 0, 0.75)',
         }}
         transition={{ duration: 0.2 }}
         style={{
@@ -75,20 +84,36 @@ function Shop() {
       >
         <div className="shop-header-inner">
 
-          {/* Logo */}
+          {/* Logo + status */}
 
-          <span
-            style={{
-              fontFamily: 'Syne',
-              fontWeight: 800,
-              fontSize: 20,
-              letterSpacing: '-0.02em',
-              color: '#ffd700',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            SnackShop
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+            <span
+              style={{
+                fontFamily: 'Syne',
+                fontWeight: 800,
+                fontSize: 20,
+                letterSpacing: '-0.02em',
+                color: '#87CEEB',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              SnackShop
+            </span>
+
+            <span
+              className="hide-on-mobile"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 100,
+                background: shopOpen ? 'var(--success-dim)' : 'var(--danger-dim)',
+                color: shopOpen ? 'var(--success)' : 'var(--danger)',
+                marginLeft: 10, flexShrink: 0,
+              }}
+            >
+              {shopOpen ? <Store size={11} /> : <DoorClosed size={11} />}
+              {shopOpen ? 'Open for pickup' : 'Closed right now'}
+            </span>
+          </div>
 
           {/* Header right */}
 
@@ -110,7 +135,7 @@ function Shop() {
                 padding: '7px 14px',
                 background:
                   totalItems > 0
-                    ? '#ffd700'
+                    ? '#87CEEB'
                     : 'var(--surface)',
                 color:
                   totalItems > 0
@@ -168,6 +193,22 @@ function Shop() {
 
       <main className="shop-main">
 
+        {!shopOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.25)',
+              borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 18,
+              color: 'var(--danger)', fontSize: 13, fontWeight: 500,
+            }}
+          >
+            <DoorClosed size={15} style={{ flexShrink: 0 }} />
+            The shop is closed right now — you can still place an order, but pickup won't be available until it reopens.
+          </motion.div>
+        )}
+
         {/* ================= HERO ================= */}
 
         <motion.div
@@ -197,7 +238,7 @@ function Shop() {
 
             <span
               style={{
-                color: '#ffd700',
+                color: '#87CEEB',
               }}
             >
               What's snacking?
@@ -252,7 +293,7 @@ function Shop() {
                   style={{
                     position: 'absolute',
                     inset: 0,
-                    background: '#ffd700',
+                    background: '#87CEEB',
                     borderRadius: 100,
                     zIndex: -1,
                   }}

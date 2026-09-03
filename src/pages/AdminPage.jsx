@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Edit2, Trash2, Check, X, LogOut, Package, MessageSquare, ShoppingBag, ImageIcon, Upload, Link, ChevronDown, ChevronUp, Clock, Loader, CheckCircle, Wallet } from 'lucide-react'
+import { Plus, Edit2, Trash2, Check, X, LogOut, Package, MessageSquare, ShoppingBag, ImageIcon, Upload, Link, ChevronDown, ChevronUp, Clock, Loader, CheckCircle, Wallet, Store, DoorClosed } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, orderBy, query, writeBatch, getDoc
+  doc, orderBy, query, writeBatch, getDoc, setDoc, serverTimestamp, runTransaction
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { signOut, onAuthStateChanged } from 'firebase/auth'
@@ -13,6 +13,8 @@ import { db, auth, storage } from '../lib/firebase'
 import Ledger from '../components/Ledger'
 
 const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen']
+
+const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 
 export const REQUEST_STATUSES = {
   pending:     { label: 'Pending',     color: 'var(--warning)',  dim: 'var(--warning-dim)',  icon: Clock },
@@ -181,7 +183,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  style={{ background: 'var(--surface)', border: `1px solid ${needsAction ? 'rgba(245,200,66,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
+                  style={{ background: 'var(--surface)', border: `1px solid ${needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
                 >
                   {needsAction && (
                     <div style={{ position: 'absolute', top: -9, left: 14, background: 'var(--accent)', color: 'var(--accent-text)', fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 100, fontFamily: 'Syne' }}>
@@ -191,9 +193,11 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{o.customerName}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                      
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontStyle: o.status === 'paid' ? 'normal' : 'italic' }}>
                         {(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}
                       </div>
+
                       {o.utr && (
                         <div style={{ fontSize: 11, background: 'var(--surface2)', borderRadius: 6, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'monospace', color: 'var(--text-secondary)', marginBottom: 4 }}>
                           UTR: <strong style={{ color: 'var(--accent)' }}>{o.utr}</strong>
@@ -269,6 +273,117 @@ function RequestStatusBadge({ status }) {
   )
 }
 
+function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const pendingCount = requests.filter(r => !r.resolved).length
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <motion.div animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>
+            <ChevronDown size={15} color="var(--text-secondary)" />
+          </motion.div>
+          <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 15 }}>{label}</span>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{requests.length} request{requests.length !== 1 ? 's' : ''}</span>
+          {pendingCount > 0 && (
+            <span style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, padding: '1px 8px', fontSize: 11, fontWeight: 700 }}>{pendingCount} open</span>
+          )}
+        </div>
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={e => { e.stopPropagation(); onDeleteAll(requests) }}
+          style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '4px 10px', color: 'var(--danger)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+          title={`Delete all ${label} requests`}
+        >
+          <Trash2 size={11} /> Delete all
+        </motion.button>
+      </div>
+
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.25 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}
+          >
+            {requests.map(r => {
+              const status = r.status || (r.resolved ? 'completed' : 'pending')
+              const nextStatus = status === 'pending' ? 'in_progress' : status === 'in_progress' ? 'completed' : null
+
+              return (
+                <motion.div
+                  key={r.id}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: status === 'completed' ? 0.6 : 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  style={{
+                    background: 'var(--surface)',
+                    border: `1px solid ${status === 'pending' ? 'rgba(135,206,235,0.2)' : status === 'in_progress' ? 'rgba(135,206,235,0.2)' : 'var(--border)'}`,
+                    borderRadius: 'var(--radius)',
+                    padding: '14px 16px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>{r.customerName}</span>
+                        <RequestStatusBadge status={status} />
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>{r.message}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                      {nextStatus && (
+                        <motion.button
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => onSetStatus(r.id, nextStatus)}
+                          style={{
+                            background: REQUEST_STATUSES[nextStatus].dim,
+                            border: 'none',
+                            borderRadius: 8,
+                            padding: '6px 12px',
+                            color: REQUEST_STATUSES[nextStatus].color,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            whiteSpace: 'nowrap',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {nextStatus === 'in_progress' ? <><Loader size={11} /> Mark In Progress</> : <><CheckCircle size={11} /> Mark Completed</>}
+                        </motion.button>
+                      )}
+
+                      <motion.button
+                        whileTap={{ scale: 0.9 }}
+                        onClick={() => onDelete(r.id)}
+                        style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 8, padding: '5px 10px', color: 'var(--danger)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+                        title="Delete request"
+                      >
+                        <Trash2 size={11} /> Delete
+                      </motion.button>
+                    </div>
+                  </div>
+                </motion.div>
+              )
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
 export default function AdminPage() {
   const navigate = useNavigate()
   const [tab, setTab] = useState('products')
@@ -282,25 +397,46 @@ export default function AdminPage() {
   const [deletingAll, setDeletingAll] = useState(false)
   const [deletingAllRequests, setDeletingAllRequests] = useState(false)
   const [newProduct, setNewProduct] = useState({ name: '', category: 'chips', price: '', stock: '', imageUrl: '' })
+  const [shopOpen, setShopOpen] = useState(true)
+  const [togglingShop, setTogglingShop] = useState(false)
+
+  const isInitialOrdersLoad = useRef(true)
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, user => { if (!user) navigate('/admin') })
+    const unsub = onAuthStateChanged(auth, user => {
+      if (!user) {
+        navigate('/admin')
+        return
+      }
+
+      if (user.email?.toLowerCase() !== ADMIN_EMAIL) {
+        navigate('/')
+      }
+    })
 
     const pUnsub = onSnapshot(collection(db, 'products'), snap => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      data.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.name || '').localeCompare(b.name || ''))
+      data.sort((a, b) => (b.stock || 0) - (a.stock || 0) || (a.name || '').localeCompare(b.name || ''))
       setProducts(data)
     }, err => console.error('Products error:', err))
 
     const oUnsub = onSnapshot(
       query(collection(db, 'orders'), orderBy('createdAt', 'desc')),
       snap => {
-        snap.docChanges().forEach(change => {
-          if (change.type === 'modified' && change.doc.data().status === 'utr_submitted') {
-            toast(`Payment submitted by ${change.doc.data().customerName}`)
-          }
-        })
-        setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        if (!isInitialOrdersLoad.current) {
+          snap.docChanges().forEach(change => {
+            const data = change.doc.data()
+            if (change.type === 'added' && data.status === 'pending') {
+              toast(`🛎️ New order from ${data.customerName}`)
+            }
+            if (change.type === 'modified' && data.status === 'utr_submitted') {
+              toast(`Payment submitted by ${data.customerName}`)
+            }
+          })
+        }
+        isInitialOrdersLoad.current = false
+        const allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        setOrders(allOrders.filter(o => o.status !== 'draft'))
       },
       err => console.error('Orders error:', err)
     )
@@ -311,29 +447,92 @@ export default function AdminPage() {
       err => console.error('Requests error:', err)
     )
 
-    return () => { unsub(); pUnsub(); oUnsub(); rUnsub() }
+    const sUnsub = onSnapshot(doc(db, 'settings', 'shopStatus'), snap => {
+      setShopOpen(snap.exists() ? snap.data().open !== false : true)
+    }, err => console.error('Shop status error:', err))
+
+    return () => { unsub(); pUnsub(); oUnsub(); rUnsub(); sUnsub() }
   }, [])
 
+  const toggleShopStatus = async () => {
+    setTogglingShop(true)
+    try {
+      await setDoc(doc(db, 'settings', 'shopStatus'), { open: !shopOpen }, { merge: true })
+      toast.success(!shopOpen ? 'Shop marked as open' : 'Shop marked as closed')
+    } catch (err) {
+      toast.error(`Failed: ${err.message}`)
+    }
+    setTogglingShop(false)
+  }
+
+  const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
+  const pendingPayments = orders.filter(o => o.status === 'utr_submitted').length
+  const needsActionCount = orders.filter(o => o.status === 'utr_submitted' || o.status === 'pending').length
+  const pendingReqs = requests.filter(r => !r.resolved).length
+  const monthGroups = groupByMonth(orders)
+  const requestMonthGroups = groupByMonth(requests)
+
+  useEffect(() => {
+    const baseIcon = (badge) => `
+      <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>
+        <rect width='100' height='100' rx='20' fill='#000000'/>
+        <text y='75' x='50' text-anchor='middle' font-size='70' font-weight='900' fill='#87CEEB' font-family='Arial'>S</text>
+        ${badge}
+      </svg>
+    `.trim()
+
+    const badgeMarkup = needsActionCount > 0 ? `
+      <circle cx='78' cy='24' r='${needsActionCount > 9 ? 26 : 22}' fill='#ff5c5c' stroke='#000000' stroke-width='4'/>
+      <text x='78' y='${needsActionCount > 9 ? '33' : '32'}' text-anchor='middle' font-size='${needsActionCount > 9 ? '30' : '34'}' font-weight='900' fill='#ffffff' font-family='Arial'>${needsActionCount > 99 ? '99+' : needsActionCount}</text>
+    ` : ''
+
+    const svg = baseIcon(badgeMarkup)
+    const href = `data:image/svg+xml,${encodeURIComponent(svg)}`
+
+    let link = document.querySelector("link[rel='icon']")
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      document.head.appendChild(link)
+    }
+    link.href = href
+
+    document.title = needsActionCount > 0
+      ? `(${needsActionCount}) SnackShop Admin`
+      : 'SnackShop Admin'
+  }, [needsActionCount])
+
   const handleLogout = async () => {
-  await signOut(auth)
-  navigate('/')
- }
+    await signOut(auth)
+    navigate('/')
+  }
 
   const markAsPaid = async (order) => {
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
-      const batch = writeBatch(db)
-      batch.update(doc(db, 'orders', order.id), { status: 'paid' })
-      for (const item of (order.items || [])) {
-        if (!item.productId) continue
-        const pSnap = await getDoc(doc(db, 'products', item.productId))
-        if (pSnap.exists()) {
-          const newStock = Math.max(0, (pSnap.data().stock || 0) - (item.qty || 0))
-          batch.update(doc(db, 'products', item.productId), { stock: newStock })
-        }
-      }
-      await batch.commit()
+      await runTransaction(db, async (tx) => {
+        const orderRef = doc(db, 'orders', order.id)
+        const items = order.items || []
+
+        const productRefs = items
+          .filter(item => item.productId)
+          .map(item => doc(db, 'products', item.productId))
+        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
+
+        const withProductId = items.filter(item => item.productId)
+
+        productSnaps.forEach((pSnap, i) => {
+          if (!pSnap.exists()) return
+          const pData = pSnap.data()
+          const qty = withProductId[i]?.qty || 0
+          const newStock = Math.max(0, (pData.stock || 0) - qty)
+          const newReserved = Math.max(0, (pData.reserved || 0) - qty)
+          tx.update(productRefs[i], { stock: newStock, reserved: newReserved })
+        })
+
+        tx.update(orderRef, { status: 'paid' })
+      })
       toast.success(`Confirmed for ${order.customerName} — stock updated`)
     } catch (err) {
       toast.error(`Failed: ${err.message}`)
@@ -345,7 +544,27 @@ export default function AdminPage() {
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
-      await updateDoc(doc(db, 'orders', order.id), { status: 'cancelled', cancelledBy: 'admin' })
+      await runTransaction(db, async (tx) => {
+        const orderRef = doc(db, 'orders', order.id)
+        const items = order.items || []
+
+        const productRefs = items
+          .filter(item => item.productId)
+          .map(item => doc(db, 'products', item.productId))
+        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
+
+        const withProductId = items.filter(item => item.productId)
+
+        productSnaps.forEach((pSnap, i) => {
+          if (!pSnap.exists()) return
+          const pData = pSnap.data()
+          const qty = withProductId[i]?.qty || 0
+          const newReserved = Math.max(0, (pData.reserved || 0) - qty)
+          tx.update(productRefs[i], { reserved: newReserved })
+        })
+
+        tx.update(orderRef, { status: 'cancelled', cancelledBy: 'admin' })
+      })
       toast('Order rejected')
     } catch (err) {
       toast.error(`Failed: ${err.message}`)
@@ -414,6 +633,7 @@ export default function AdminPage() {
         price: Number(newProduct.price),
         stock: Number(newProduct.stock),
         stockMax: Number(newProduct.stock),
+        reserved: 0,
         imageUrl: newProduct.imageUrl || '',
       })
       toast.success('Product added!')
@@ -433,7 +653,11 @@ export default function AdminPage() {
 
   const setRequestStatus = async (id, newStatus) => {
     try {
-      await updateDoc(doc(db, 'requests', id), { status: newStatus, resolved: newStatus === 'completed' })
+      await updateDoc(doc(db, 'requests', id), {
+        status: newStatus,
+        resolved: newStatus === 'completed',
+        ...(newStatus === 'completed' ? { completedAt: serverTimestamp() } : {}),
+      })
       toast.success(`Request marked as ${REQUEST_STATUSES[newStatus]?.label}`)
     } catch (err) {
       toast.error(`Failed: ${err.message}`)
@@ -460,6 +684,14 @@ export default function AdminPage() {
     setDeletingAllRequests(false)
   }
 
+  const deleteMonthRequests = async (monthRequests) => {
+    if (!confirm(`Delete all ${monthRequests.length} requests in this month? This cannot be undone.`)) return
+    const batch = writeBatch(db)
+    monthRequests.forEach(r => batch.delete(doc(db, 'requests', r.id)))
+    await batch.commit()
+    toast.success(`${monthRequests.length} requests deleted`)
+  }
+
   const tabs = [
     { id: 'products', label: 'Products', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
@@ -467,27 +699,59 @@ export default function AdminPage() {
     { id: 'finance', label: 'Finance', icon: Wallet },
   ]
 
-  const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const pendingPayments = orders.filter(o => o.status === 'utr_submitted').length
-  const pendingReqs = requests.filter(r => !r.resolved).length
-  const monthGroups = groupByMonth(orders)
-
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      <style>{`
+        @keyframes badgePulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255,159,67,0.55); }
+          50% { box-shadow: 0 0 0 5px rgba(255,159,67,0); }
+        }
+        .admin-tab-badge {
+          animation: badgePulse 1.6s ease-in-out infinite;
+        }
+        .no-spinner::-webkit-outer-spin-button,
+        .no-spinner::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        .no-spinner {
+          -moz-appearance: textfield;
+        }
+      `}</style>
       <header style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 30 }}>
         <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px', height: 58, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 18 }}>SnackShop</span>
             <span style={{ fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '2px 8px', borderRadius: 100, fontWeight: 600 }}>ADMIN</span>
           </div>
-          <motion.button 
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={handleLogout} 
-            style={{ background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.2)', borderRadius: 8, padding: '6px 12px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}
-          >
-            <LogOut size={13} /> Logout
-          </motion.button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={toggleShopStatus}
+              disabled={togglingShop}
+              style={{
+                background: shopOpen ? 'var(--success-dim)' : 'var(--danger-dim)',
+                border: `1px solid ${shopOpen ? 'rgba(46,204,113,0.3)' : 'rgba(255,92,92,0.3)'}`,
+                borderRadius: 100, padding: '6px 14px',
+                color: shopOpen ? 'var(--success)' : 'var(--danger)',
+                display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+                cursor: togglingShop ? 'not-allowed' : 'pointer', opacity: togglingShop ? 0.6 : 1,
+              }}
+              title="Toggle whether the shop shows as open for pickup"
+            >
+              {shopOpen ? <Store size={13} /> : <DoorClosed size={13} />}
+              {shopOpen ? 'Shop Open' : 'Shop Closed'}
+            </motion.button>
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleLogout} 
+              style={{ background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.2)', borderRadius: 8, padding: '6px 12px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}
+            >
+              <LogOut size={13} /> Logout
+            </motion.button>
+          </div>
         </div>
       </header>
 
@@ -531,8 +795,16 @@ export default function AdminPage() {
                 />
               )}
               <t.icon size={13} /> {t.label}
-              {t.id === 'orders' && pendingPayments > 0 && <span style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{pendingPayments}</span>}
-              {t.id === 'requests' && pendingReqs > 0 && <span style={{ background: 'var(--danger)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{pendingReqs}</span>}
+              {t.id === 'orders' && needsActionCount > 0 && (
+                <span className="admin-tab-badge" style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                  {needsActionCount}
+                </span>
+              )}
+              {t.id === 'requests' && pendingReqs > 0 && (
+                <span className="admin-tab-badge" style={{ background: 'var(--danger)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
+                  {pendingReqs}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -568,8 +840,8 @@ export default function AdminPage() {
                       <select value={newProduct.category} onChange={e => setNewProduct(p => ({ ...p, category: e.target.value }))}>
                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <input type="number" value={newProduct.price} onChange={e => setNewProduct(p => ({ ...p, price: e.target.value }))} placeholder="Price ₹ *" />
-                      <input type="number" value={newProduct.stock} onChange={e => setNewProduct(p => ({ ...p, stock: e.target.value }))} placeholder="Stock qty *" />
+                      <input type="number" className="no-spinner" value={newProduct.price} onChange={e => setNewProduct(p => ({ ...p, price: e.target.value }))} placeholder="Price ₹ *" />
+                      <input type="number" className="no-spinner" value={newProduct.stock} onChange={e => setNewProduct(p => ({ ...p, stock: e.target.value }))} placeholder="Stock qty *" />
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
@@ -606,8 +878,8 @@ export default function AdminPage() {
                           <select value={editData.category || 'chips'} onChange={e => setEditData(d => ({ ...d, category: e.target.value }))}>
                             {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
-                          <input type="number" value={editData.price || ''} onChange={e => setEditData(d => ({ ...d, price: e.target.value }))} placeholder="₹" />
-                          <input type="number" value={editData.stock || ''} onChange={e => setEditData(d => ({ ...d, stock: e.target.value }))} placeholder="Stock" />
+                          <input type="number" className="no-spinner" value={editData.price || ''} onChange={e => setEditData(d => ({ ...d, price: e.target.value }))} placeholder="₹" />
+                          <input type="number" className="no-spinner" value={editData.stock || ''} onChange={e => setEditData(d => ({ ...d, stock: e.target.value }))} placeholder="Stock" />
                         </div>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                           <button onClick={() => saveEdit(p.id)} style={{ background: 'var(--success)', border: 'none', borderRadius: 8, padding: '8px 16px', color: 'white', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><Check size={13} /> Save</button>
@@ -698,73 +970,16 @@ export default function AdminPage() {
               <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14, background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>No requests yet</div>
             )}
 
-            <AnimatePresence>
-              {requests.map(r => {
-                const status = r.status || (r.resolved ? 'completed' : 'pending')
-                const nextStatus = status === 'pending' ? 'in_progress' : status === 'in_progress' ? 'completed' : null
-
-                return (
-                  <motion.div
-                    key={r.id}
-                    layout
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: status === 'completed' ? 0.6 : 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    style={{
-                      background: 'var(--surface)',
-                      border: `1px solid ${status === 'pending' ? 'rgba(245,200,66,0.2)' : status === 'in_progress' ? 'rgba(var(--accent-rgb, 245,200,66),0.2)' : 'var(--border)'}`,
-                      borderRadius: 'var(--radius)',
-                      padding: '14px 16px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                          <span style={{ fontWeight: 600, fontSize: 14 }}>{r.customerName}</span>
-                          <RequestStatusBadge status={status} />
-                        </div>
-                        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>{r.message}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</div>
-                      </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-                        {nextStatus && (
-                          <motion.button
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => setRequestStatus(r.id, nextStatus)}
-                            style={{
-                              background: REQUEST_STATUSES[nextStatus].dim,
-                              border: 'none',
-                              borderRadius: 8,
-                              padding: '6px 12px',
-                              color: REQUEST_STATUSES[nextStatus].color,
-                              fontSize: 12,
-                              fontWeight: 600,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              whiteSpace: 'nowrap',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            {nextStatus === 'in_progress' ? <><Loader size={11} /> Mark In Progress</> : <><CheckCircle size={11} /> Mark Completed</>}
-                          </motion.button>
-                        )}
-
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => deleteRequest(r.id)}
-                          style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 8, padding: '5px 10px', color: 'var(--danger)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
-                          title="Delete request"
-                        >
-                          <Trash2 size={11} /> Delete
-                        </motion.button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )
-              })}
-            </AnimatePresence>
+            {Object.entries(requestMonthGroups).map(([label, monthRequests]) => (
+              <RequestMonthGroup
+                key={label}
+                label={label}
+                requests={monthRequests}
+                onSetStatus={setRequestStatus}
+                onDelete={deleteRequest}
+                onDeleteAll={deleteMonthRequests}
+              />
+            ))}
           </div>
         )}
 

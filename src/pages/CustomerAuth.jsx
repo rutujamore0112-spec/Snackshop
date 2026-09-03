@@ -6,6 +6,8 @@ import { doc, getDoc } from 'firebase/firestore'
 import { motion } from 'framer-motion'
 import { auth, db } from '../lib/firebase'
 
+const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
+
 export default function CustomerAuth() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
@@ -20,7 +22,11 @@ export default function CustomerAuth() {
 
       const userDoc = await getDoc(doc(db, 'users', user.uid))
 
-      if (userDoc.exists() && userDoc.data().role === 'admin') {
+      if (
+        user.email?.toLowerCase() === ADMIN_EMAIL &&
+        userDoc.exists() &&
+        userDoc.data().role === 'admin'
+      ) {
         navigate('/admin/dashboard')
       } else {
         navigate('/')
@@ -40,9 +46,9 @@ export default function CustomerAuth() {
     <div
       style={{
         minHeight: '100vh',
-        background: '#0d0d0d',
+        background: '#000000',
         backgroundImage:
-          'radial-gradient(circle at 50% 20%, #1e1b00 0%, #0d0d0d 70%)',
+          'radial-gradient(circle at 50% 20%, #001524 0%, #000000 70%)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -69,7 +75,7 @@ export default function CustomerAuth() {
             transform: 'translateX(-50%)',
             width: 220,
             height: 220,
-            background: '#ffd700',
+            background: '#87CEEB',
             filter: 'blur(80px)',
             borderRadius: '50%',
             pointerEvents: 'none',
@@ -95,7 +101,7 @@ export default function CustomerAuth() {
               margin: 0,
             }}
           >
-            Snack<span style={{ color: '#ffd700' }}>Shop</span>
+            Snack<span style={{ color: '#87CEEB' }}>Shop</span>
           </h1>
 
           <p
@@ -119,21 +125,21 @@ export default function CustomerAuth() {
             ease: [0.16, 1, 0.3, 1],
           }}
           style={{
-            background: '#141414',
-            border: '1px solid #27272a',
+            background: '#0a0a0a',
+            border: '1px solid #141414',
             borderRadius: 20,
             padding: 32,
             textAlign: 'center',
             boxShadow:
-              '0 20px 40px -15px rgba(0, 0, 0, 0.7), 0 0 20px rgba(255, 215, 0, 0.05)',
+              '0 20px 40px -15px rgba(0, 0, 0, 0.7), 0 0 20px rgba(135, 206, 235, 0.05)',
           }}
         >
           <div
             style={{
               display: 'inline-block',
-              background: '#221f06',
-              border: '1px solid #423806',
-              color: '#ffd700',
+              background: 'rgba(135, 206, 235, 0.1)',
+              border: '1px solid rgba(135, 206, 235, 0.25)',
+              color: '#87CEEB',
               padding: '6px 14px',
               borderRadius: 20,
               fontSize: 12,
@@ -161,7 +167,7 @@ export default function CustomerAuth() {
           <motion.button
             whileHover={{
               scale: loading ? 1 : 1.02,
-              backgroundColor: loading ? '#27272a' : '#ffe44d',
+              backgroundColor: loading ? '#141414' : '#a3daff',
             }}
             whileTap={{ scale: loading ? 1 : 0.97 }}
             onClick={handleGoogleSignIn}
@@ -170,7 +176,7 @@ export default function CustomerAuth() {
               width: '100%',
               padding: '14px 18px',
               borderRadius: 14,
-              background: loading ? '#27272a' : '#ffd700',
+              background: loading ? '#141414' : '#87CEEB',
               color: loading ? '#71717a' : '#000000',
               display: 'flex',
               alignItems: 'center',
@@ -180,7 +186,7 @@ export default function CustomerAuth() {
               fontSize: 15,
               border: 'none',
               cursor: loading ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 14px rgba(255, 215, 0, 0.25)',
+              boxShadow: '0 4px 14px rgba(135, 206, 235, 0.25)',
             }}
           >
             {!loading && (
@@ -204,7 +210,25 @@ export default function CustomerAuth() {
               </svg>
             )}
 
-            {loading ? 'Signing in...' : 'Continue with Google'}
+            {loading ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  style={{
+                    animation: 'spin 1s linear infinite',
+                  }}
+                >
+                  <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                </svg>
+                Signing in...
+              </div>
+            ) : 'Continue with Google'}
           </motion.button>
         </motion.div>
       </div>

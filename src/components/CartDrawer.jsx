@@ -1,45 +1,35 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Trash2, CheckCircle, Copy, ArrowRight, Loader, Banknote, QrCode, Clock, XCircle } from 'lucide-react'
+import { X, Trash2, CheckCircle, Copy, ArrowRight, Banknote, QrCode, Clock, XCircle, ShoppingCart } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, serverTimestamp, runTransaction, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useCart } from '../lib/CartContext'
 import { useAuth } from '../lib/AuthContext'
 
 const UPI_ID = 'abhinavmandal68@oksbi'
 const OWNER_NAME = 'Abhinav Mandal'
-const TIMER_SECONDS = 120 // 2 minutes
+const TIMER_SECONDS = 120 
 
 export default function CartDrawer({ products, open, onClose }) {
-  const { items, removeFromCart, clearCart } = useCart()
+  const { items, addToCart, decrementFromCart, removeFromCart, clearCart } = useCart()
   const { profile, user } = useAuth()
-  const customerName =
-    user?.displayName ||
-    profile?.name ||
-    user?.email?.split('@')[0] ||
-    profile?.email?.split('@')[0] ||
-    'Customer'
-  // cart | method | qr | utr | cash_pending | done | cancelled
+  const customerName = user?.displayName || profile?.name || user?.email?.split('@')[0] || profile?.email?.split('@')[0] || 'Customer'
+  
   const [step, setStep] = useState('cart')
-  const [utr, setUtr] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [orderId, setOrderId] = useState(null)
   const [cancelling, setCancelling] = useState(false)
 
-  // Captured at order-creation time so they survive clearCart()
   const [finalTotal, setFinalTotal] = useState(0)
   const [finalName, setFinalName] = useState('')
 
-  // ── Countdown timer state ──────────────────────────────────────
   const [secondsLeft, setSecondsLeft] = useState(TIMER_SECONDS)
   const timerRef = useRef(null)
 
   const cartProducts = products.filter(p => items[p.id])
   const total = cartProducts.reduce((s, p) => s + p.price * items[p.id], 0)
 
-  // Start/stop the 2-minute countdown whenever we enter qr or utr step
   useEffect(() => {
-    if (step === 'qr' || step === 'utr') {
+    if (step === 'qr') {
       setSecondsLeft(TIMER_SECONDS)
       timerRef.current = setInterval(() => {
         setSecondsLeft(s => {
@@ -53,8 +43,15 @@ export default function CartDrawer({ products, open, onClose }) {
       }, 1000)
     }
     return () => clearInterval(timerRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && open) handleClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open, step]) 
 
   const formatTime = (s) => {
     const m = Math.floor(s / 60)
@@ -68,29 +65,53 @@ export default function CartDrawer({ products, open, onClose }) {
   }
 
   const createOrder = async (paymentMethod) => {
+    const orderItems = cartProducts.map(p => ({
+      productId: p.id, name: p.name, qty: items[p.id], price: p.price,
+    }))
+
+    const orderRef = doc(collection(db, 'orders'))
+
     try {
-      const orderItems = cartProducts.map(p => ({
-        productId: p.id,
-        name: p.name,
-        qty: items[p.id],
-        price: p.price,
-      }))
-      const ref = await addDoc(collection(db, 'orders'), {
-        customerName,
-        userId: user?.uid || profile?.id || null,
-        items: orderItems,
-        total,
-        status: 'pending',
-        paymentMethod, // 'upi' | 'cash'
-        createdAt: serverTimestamp(),
+      await runTransaction(db, async (tx) => {
+        const productRefs = orderItems.map(it => doc(db, 'products', it.productId))
+        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
+
+        for (let i = 0; i < orderItems.length; i++) {
+          const snap = productSnaps[i]
+          const it = orderItems[i]
+          if (!snap.exists()) throw new Error(`${it.name} is no longer available`)
+          
+          const data = snap.data()
+          const available = (data.stock || 0) - (data.reserved || 0)
+          if (available < it.qty) {
+            throw new Error(available <= 0 ? `${it.name} just sold out` : `Only ${available} ${it.name} left`)
+          }
+        }
+
+        productSnaps.forEach((snap, i) => {
+          const data = snap.data()
+          tx.update(productRefs[i], { reserved: (data.reserved || 0) + orderItems[i].qty })
+        })
+
+        tx.set(orderRef, {
+          customerName, 
+          userId: user?.uid || profile?.id || null, 
+          items: orderItems, 
+          total,
+          // FIX: Create UPI orders as 'draft' so the admin doesn't see them until they click "I have paid"
+          status: paymentMethod === 'upi' ? 'draft' : 'pending', 
+          paymentMethod, 
+          createdAt: serverTimestamp(),
+        })
       })
-      setOrderId(ref.id)
+
+      setOrderId(orderRef.id)
       setFinalTotal(total)
       setFinalName(customerName)
-      return ref.id
+      return orderRef.id
     } catch (err) {
       console.error(err)
-      toast.error('Could not create order, try again')
+      toast.error(err.message || 'Could not create order, try again')
       return null
     }
   }
@@ -108,66 +129,79 @@ export default function CartDrawer({ products, open, onClose }) {
     }
   }
 
-  const handleSubmitUTR = async () => {
-    if (utr.trim().length < 6) { toast.error('Enter a valid UTR / transaction ID'); return }
-    setSubmitting(true)
+  // FIX: Push the status update to Firestore so the Admin gets the notification
+  const handleConfirmPaid = async () => {
+    if (!orderId) return
     try {
-      await updateDoc(doc(db, 'orders', orderId), {
-        utr: utr.trim(),
-        status: 'utr_submitted',
-      })
+      await updateDoc(doc(db, 'orders', orderId), { status: 'pending' })
       clearCart()
       setStep('done')
     } catch (err) {
-      toast.error('Submission failed, try again')
+      console.error('Failed to update order status:', err)
+      toast.error('Could not submit payment, try again')
     }
-    setSubmitting(false)
   }
 
-  // Manual cancel button — deletes the pending order and returns to cart
+  const releaseOrder = async (id) => {
+    if (!id) return
+    try {
+      await runTransaction(db, async (tx) => {
+        const orderRef2 = doc(db, 'orders', id)
+        const orderSnap = await tx.get(orderRef2)
+        // Release reservation if it's draft or pending
+        if (!orderSnap.exists() || (orderSnap.data().status !== 'pending' && orderSnap.data().status !== 'draft')) return
+
+        const orderData = orderSnap.data()
+        const productRefs = (orderData.items || []).filter(it => it.productId).map(it => doc(db, 'products', it.productId))
+        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
+
+        productSnaps.forEach((snap, i) => {
+          if (!snap.exists()) return
+          const data = snap.data()
+          const qty = orderData.items[i]?.qty || 0
+          tx.update(productRefs[i], { reserved: Math.max(0, (data.reserved || 0) - qty) })
+        })
+
+        tx.update(orderRef2, { status: 'cancelled', cancelledBy: 'customer' })
+      })
+    } catch (err) {
+      console.error(`Could not release order ${id}:`, err)
+    }
+  }
+
   const handleCancelOrder = async () => {
     if (!orderId) { resetAndClose(false); return }
     setCancelling(true)
-    try {
-      await deleteDoc(doc(db, 'orders', orderId))
-      toast('Order cancelled', { icon: '✕' })
-    } catch (err) {
-      // even if delete fails (e.g. already gone), still let them exit
-    }
+    await releaseOrder(orderId)
+    toast('Order cancelled', { icon: '✕' })
     setCancelling(false)
     setStep('cart')
     setOrderId(null)
     clearInterval(timerRef.current)
   }
 
-  // Auto-cancel when timer hits 0
   const handleAutoCancel = async () => {
-    if (orderId) {
-      try { await deleteDoc(doc(db, 'orders', orderId)) } catch {}
-    }
+    await releaseOrder(orderId)
     toast.error('Payment window expired — order cancelled')
     setStep('cart')
     setOrderId(null)
   }
 
   const resetAndClose = (keepCart = true) => {
-    setStep('cart'); setUtr(''); setOrderId(null)
+    setStep('cart')
+    setOrderId(null)
     if (!keepCart) clearCart()
     onClose()
   }
 
   const handleClose = () => {
-    // If mid-payment, cancelling the order on close too (avoid orphaned pending orders)
-    if ((step === 'qr' || step === 'utr') && orderId) {
-      deleteDoc(doc(db, 'orders', orderId)).catch(() => {})
-    }
+    if (step === 'qr' && orderId) releaseOrder(orderId)
     resetAndClose()
   }
 
   const copyUPI = () => { navigator.clipboard.writeText(UPI_ID); toast.success('UPI ID copied!') }
 
   if (!open) return null
-
   const isUrgent = secondsLeft <= 20
 
   return (
@@ -176,7 +210,6 @@ export default function CartDrawer({ products, open, onClose }) {
       <div style={{ position: 'fixed', right: 0, top: 0, bottom: 0, width: '100%', maxWidth: 420, background: 'var(--surface)', borderLeft: '1px solid var(--border)', zIndex: 50, display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'slideIn 0.22s ease' }}>
         <style>{`
           @keyframes slideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }
-          @keyframes spin { to { transform: rotate(360deg) } }
           @keyframes popIn { from { transform: scale(0.88); opacity: 0 } to { transform: scale(1); opacity: 1 } }
           @keyframes pulseRed { 0%,100%{opacity:1} 50%{opacity:0.4} }
         `}</style>
@@ -187,7 +220,6 @@ export default function CartDrawer({ products, open, onClose }) {
             {step === 'cart' && 'Your Cart'}
             {step === 'method' && 'Choose Payment'}
             {step === 'qr' && 'Scan & Pay'}
-            {step === 'utr' && 'Confirm Payment'}
             {step === 'cash_pending' && 'Pay by Cash'}
             {step === 'done' && 'Order Placed!'}
           </h2>
@@ -196,59 +228,30 @@ export default function CartDrawer({ products, open, onClose }) {
           </button>
         </div>
 
-        {/* Countdown timer bar — only during qr/utr steps */}
-        {(step === 'qr' || step === 'utr') && (
-          <div style={{
-            padding: '9px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            borderBottom: '1px solid var(--border)', flexShrink: 0,
-            background: isUrgent ? 'var(--danger-dim)' : 'var(--surface2)',
-          }}>
+        {/* Countdown timer bar */}
+        {step === 'qr' && (
+          <div style={{ padding: '9px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', flexShrink: 0, background: isUrgent ? 'var(--danger-dim)' : 'var(--surface2)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: isUrgent ? 'var(--danger)' : 'var(--text-secondary)', animation: isUrgent ? 'pulseRed 1s infinite' : 'none' }}>
               <Clock size={13} />
-              <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 13 }}>
-                {formatTime(secondsLeft)} left to complete
-              </span>
+              <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 13 }}>{formatTime(secondsLeft)} left to complete</span>
             </div>
-            <button
-              onClick={handleCancelOrder}
-              disabled={cancelling}
-              style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: 'var(--danger)', fontSize: 12, fontWeight: 600, padding: 0 }}
-            >
+            <button onClick={handleCancelOrder} disabled={cancelling} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: 'var(--danger)', fontSize: 12, fontWeight: 600, padding: 0 }}>
               <XCircle size={13} /> {cancelling ? 'Cancelling…' : 'Cancel'}
             </button>
           </div>
         )}
 
-        {/* Step pills */}
-        {(step === 'qr' || step === 'utr') && (
-          <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-            {['Scan QR', 'Enter UTR'].map((label, i) => {
-              const active = (i === 0 && step === 'qr') || (i === 1 && step === 'utr')
-              const done = i === 0 && step === 'utr'
-              return (
-                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <div style={{ width: 20, height: 20, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, background: done ? 'var(--success)' : active ? 'var(--accent)' : 'var(--surface2)', color: done ? 'white' : active ? 'var(--accent-text)' : 'var(--text-hint)' }}>
-                      {done ? '✓' : i + 1}
-                    </div>
-                    <span style={{ fontSize: 12, color: active ? 'var(--text)' : 'var(--text-hint)', fontWeight: active ? 500 : 400 }}>{label}</span>
-                  </div>
-                  {i === 0 && <ArrowRight size={11} color="var(--text-hint)" />}
-                </div>
-              )
-            })}
-          </div>
-        )}
-
         {/* Content */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', WebkitOverflowScrolling: 'touch' }}>
+        <div className="custom-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', WebkitOverflowScrolling: 'touch' }}>
 
           {/* CART */}
           {step === 'cart' && (
             <>
               {cartProducts.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-hint)' }}>
-                  <p style={{ fontSize: 14 }}>Your cart is empty</p>
+                <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-hint)' }}>
+                  <ShoppingCart size={48} style={{ opacity: 0.2, margin: '0 auto 16px', display: 'block' }} />
+                  <p style={{ fontSize: 15, fontFamily: 'Syne', fontWeight: 600, color: 'var(--text-secondary)' }}>Your cart is empty</p>
+                  <p style={{ fontSize: 13, marginTop: 4 }}>Add some snacks to get started!</p>
                 </div>
               ) : (
                 <>
@@ -263,9 +266,12 @@ export default function CartDrawer({ products, open, onClose }) {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 15 }}>₹{p.price * items[p.id]}</span>
-                        <button onClick={() => removeFromCart(p.id)} style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--danger)', display: 'flex' }}>
-                          <Trash2 size={13} />
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--surface2)', borderRadius: 8 }}>
+                          <button onClick={() => decrementFromCart(p.id)} style={{ background: 'none', border: 'none', padding: '6px 9px', color: 'var(--text)', fontWeight: 700, cursor: 'pointer', display: 'flex' }}>−</button>
+                          <span style={{ fontWeight: 700, fontSize: 13, minWidth: 16, textAlign: 'center' }}>{items[p.id]}</span>
+                          <button onClick={() => addToCart(p, 1)} disabled={(p.visibleStock ?? p.stock ?? 0) - items[p.id] <= 0} style={{ background: 'none', border: 'none', padding: '6px 9px', color: 'var(--text)', fontWeight: 700, cursor: 'pointer', display: 'flex', opacity: (p.visibleStock ?? p.stock ?? 0) - items[p.id] <= 0 ? 0.35 : 1 }}>+</button>
+                        </div>
+                        <button onClick={() => removeFromCart(p.id)} style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--danger)', display: 'flex' }}><Trash2 size={13} /></button>
                       </div>
                     </div>
                   ))}
@@ -282,41 +288,17 @@ export default function CartDrawer({ products, open, onClose }) {
                 <span style={{ width: 1, height: 14, background: 'var(--border)' }} />
                 <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 16 }}>₹{total}</span>
               </div>
-
-              <button
-                onClick={handleChooseUPI}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 14, textAlign: 'left' }}
-              >
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <QrCode size={18} color="var(--accent)" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay by UPI</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Scan QR, instant confirmation</div>
-                </div>
+              <button onClick={handleChooseUPI} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><QrCode size={18} color="var(--accent)" /></div>
+                <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay by UPI</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Scan QR, instant confirmation</div></div>
                 <ArrowRight size={15} color="var(--text-hint)" />
               </button>
-
-              <button
-                onClick={handleChooseCash}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 14, textAlign: 'left' }}
-              >
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--success-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Banknote size={18} color="var(--success)" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay by Cash</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Pay Abhinav directly on pickup</div>
-                </div>
+              <button onClick={handleChooseCash} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Banknote size={18} color="var(--success)" /></div>
+                <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay by Cash</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Pay the admin directly on pickup</div></div>
                 <ArrowRight size={15} color="var(--text-hint)" />
               </button>
-
-              <button
-                onClick={() => setStep('cart')}
-                style={{ marginTop: 4, padding: 10, background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 13 }}
-              >
-                ← Back to cart
-              </button>
+              <button onClick={() => setStep('cart')} style={{ marginTop: 4, padding: 10, background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 13 }}>← Back to cart</button>
             </div>
           )}
 
@@ -328,55 +310,20 @@ export default function CartDrawer({ products, open, onClose }) {
                 <span style={{ width: 1, height: 14, background: 'var(--border)' }} />
                 <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 16 }}>₹{total}</span>
               </div>
-
               <div style={{ background: 'white', borderRadius: 20, padding: '16px 16px 10px', display: 'inline-block', marginBottom: 16 }}>
                 <img src="/qr.jpeg" alt="UPI QR" style={{ width: 230, height: 230, display: 'block', objectFit: 'contain', borderRadius: 10 }} />
                 <p style={{ fontSize: 12, color: '#555', marginTop: 8, fontWeight: 600 }}>{OWNER_NAME}</p>
               </div>
-
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 22 }}>
                 <code style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--surface2)', padding: '5px 12px', borderRadius: 8 }}>{UPI_ID}</code>
-                <button onClick={copyUPI} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 8px', color: 'var(--text-secondary)', display: 'flex' }}>
-                  <Copy size={13} />
-                </button>
+                <button onClick={copyUPI} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 8px', color: 'var(--text-secondary)', display: 'flex' }}><Copy size={13} /></button>
               </div>
-
               <ol style={{ textAlign: 'left', paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 2.2 }}>
                 <li>Open GPay / PhonePe / Paytm / any UPI app</li>
                 <li>Scan QR or pay to UPI ID above</li>
                 <li>Pay exactly <strong style={{ color: 'var(--accent)', fontFamily: 'Syne' }}>₹{total}</strong></li>
-                <li>Note the <strong style={{ color: 'var(--text)' }}>UTR / transaction ID</strong> shown after payment</li>
+                <li>Tap "I've paid" below once done</li>
               </ol>
-            </div>
-          )}
-
-          {/* UTR */}
-          {step === 'utr' && (
-            <div style={{ animation: 'popIn 0.3s ease' }}>
-              <div style={{ background: 'var(--success-dim)', border: '1px solid rgba(46,204,113,0.2)', borderRadius: 12, padding: '14px 16px', marginBottom: 20, display: 'flex', gap: 10 }}>
-                <span style={{ fontSize: 20, flexShrink: 0 }}>✅</span>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--success)', marginBottom: 3 }}>Payment done? Almost there!</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>Enter your UTR below. Abhinav will verify and confirm your order — stock updates automatically.</div>
-                </div>
-              </div>
-              <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>UTR / Transaction ID</label>
-              <input value={utr} onChange={e => setUtr(e.target.value)} placeholder="e.g. 512345678901" style={{ marginBottom: 8, fontFamily: 'monospace', letterSpacing: '0.05em' }} />
-              <p style={{ fontSize: 11, color: 'var(--text-hint)', lineHeight: 1.6, marginBottom: 20 }}>Find this in your UPI app → payment history → transaction details. Usually a 12-digit number.</p>
-
-              <div style={{ background: 'var(--surface2)', borderRadius: 12, padding: '12px 14px' }}>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>Order summary</p>
-                {cartProducts.map(p => (
-                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0', color: 'var(--text)' }}>
-                    <span>{p.name} ×{items[p.id]}</span>
-                    <span style={{ fontWeight: 500 }}>₹{p.price * items[p.id]}</span>
-                  </div>
-                ))}
-                <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontFamily: 'Syne', fontWeight: 700 }}>
-                  <span>Total paid</span>
-                  <span style={{ color: 'var(--accent)' }}>₹{total}</span>
-                </div>
-              </div>
             </div>
           )}
 
@@ -386,14 +333,12 @@ export default function CartDrawer({ products, open, onClose }) {
               <Banknote size={62} color="var(--success)" style={{ margin: '0 auto 16px', display: 'block' }} />
               <h3 style={{ fontFamily: 'Syne', fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Order placed!</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 280, margin: '0 auto' }}>
-                Pay <strong style={{ color: 'var(--accent)' }}>₹{finalTotal}</strong> in cash to Abhinav on pickup. Abhinav will verify and confirm your order — stock updates automatically once confirmed.
+                Pay <strong style={{ color: 'var(--accent)' }}>₹{finalTotal}</strong> in cash to the admin on pickup. The admin will verify and confirm your order — stock updates automatically once confirmed.
               </p>
               <div style={{ background: 'var(--surface2)', borderRadius: 12, padding: '12px 16px', marginTop: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
                 Order by <strong style={{ color: 'var(--text)' }}>{finalName}</strong> · <strong style={{ color: 'var(--accent)', fontFamily: 'Syne' }}>₹{finalTotal}</strong>
               </div>
-              <button onClick={() => resetAndClose()} style={{ marginTop: 24, padding: '11px 28px', background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: 100, fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>
-                Back to shop
-              </button>
+              <button onClick={() => resetAndClose()} style={{ marginTop: 24, padding: '11px 28px', background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: 100, fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Back to shop</button>
             </div>
           )}
 
@@ -403,14 +348,12 @@ export default function CartDrawer({ products, open, onClose }) {
               <CheckCircle size={62} color="var(--success)" style={{ margin: '0 auto 16px', display: 'block' }} />
               <h3 style={{ fontFamily: 'Syne', fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Order submitted!</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 280, margin: '0 auto' }}>
-                Abhinav will verify your payment and confirm the order. Stock updates automatically once confirmed.
+                The admin will verify your payment and confirm the order. Stock updates automatically once confirmed.
               </p>
               <div style={{ background: 'var(--surface2)', borderRadius: 12, padding: '12px 16px', marginTop: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
                 Order by <strong style={{ color: 'var(--text)' }}>{finalName}</strong> · <strong style={{ color: 'var(--accent)', fontFamily: 'Syne' }}>₹{finalTotal}</strong>
               </div>
-              <button onClick={() => resetAndClose()} style={{ marginTop: 24, padding: '11px 28px', background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: 100, fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>
-                Back to shop
-              </button>
+              <button onClick={() => resetAndClose()} style={{ marginTop: 24, padding: '11px 28px', background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: 100, fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Back to shop</button>
             </div>
           )}
         </div>
@@ -430,18 +373,10 @@ export default function CartDrawer({ products, open, onClose }) {
 
         {step === 'qr' && (
           <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-            <button onClick={() => setStep('utr')} style={{ width: '100%', padding: 13, borderRadius: 12, background: 'var(--accent)', color: 'var(--accent-text)', fontFamily: 'Syne', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              I've paid — Enter transaction ID <ArrowRight size={16} />
+            <button onClick={handleConfirmPaid} style={{ width: '100%', padding: 13, borderRadius: 12, background: 'var(--success-dim)', color: 'var(--success)', border: '1px solid rgba(46,204,113,0.3)', fontFamily: 'Syne', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <CheckCircle size={16} /> I've paid
             </button>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 8 }}>Only tap after completing UPI payment</p>
-          </div>
-        )}
-
-        {step === 'utr' && (
-          <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-            <button onClick={handleSubmitUTR} disabled={submitting} style={{ width: '100%', padding: 13, borderRadius: 12, background: submitting ? 'var(--surface2)' : 'var(--success)', color: submitting ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              {submitting ? <><Loader size={15} style={{ animation: 'spin 1s linear infinite' }} /> Submitting...</> : <><CheckCircle size={15} /> Submit & confirm order</>}
-            </button>
           </div>
         )}
       </div>
