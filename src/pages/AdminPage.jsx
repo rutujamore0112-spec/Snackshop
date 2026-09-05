@@ -16,6 +16,11 @@ const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen']
 
 const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 
+// Order statuses that still hold a live `reserved` quantity on a product.
+// Anything outside this set (paid / cancelled) has already been settled,
+// so there's nothing left to release.
+const ACTIVE_RESERVING_STATUSES = ['pending', 'utr_submitted', 'draft']
+
 export const REQUEST_STATUSES = {
   pending:     { label: 'Pending',     color: 'var(--warning)',  dim: 'var(--warning-dim)',  icon: Clock },
   in_progress: { label: 'In Progress', color: 'var(--accent)',   dim: 'var(--accent-dim)',   icon: Loader },
@@ -572,14 +577,56 @@ export default function AdminPage() {
     setProcessing(p => ({ ...p, [order.id]: false }))
   }
 
+  // ── NEW: shared helper ──────────────────────────────────────────
+  // Releases any `reserved` stock an order is still holding, IF that
+  // order is still in an active/unsettled state (pending, utr_submitted,
+  // or draft). Paid/cancelled orders already had their reservation
+  // settled, so this is a no-op for them. This must run BEFORE the
+  // order doc is deleted — once deleted, there's no way to know what
+  // to release.
+  const releaseIfActive = async (order) => {
+    if (!order || !ACTIVE_RESERVING_STATUSES.includes(order.status)) return
+
+    const items = order.items || []
+    const withProductId = items.filter(it => it.productId)
+    if (withProductId.length === 0) return
+
+    const productRefs = withProductId.map(it => doc(db, 'products', it.productId))
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
+        productSnaps.forEach((snap, i) => {
+          if (!snap.exists()) return
+          const data = snap.data()
+          const qty = withProductId[i]?.qty || 0
+          const newReserved = Math.max(0, (data.reserved || 0) - qty)
+          tx.update(productRefs[i], { reserved: newReserved })
+        })
+      })
+    } catch (err) {
+      console.error(`Could not release reservation for order ${order.id}:`, err)
+      // Don't block the delete on this — surface it, but proceed. Worst case
+      // an admin has to manually zero out `reserved` on the product later.
+      toast.error(`Warning: stock for this order may not have released (${err.message})`)
+    }
+  }
+
   const deleteOrder = async (id) => {
     if (!confirm('Delete this order permanently?')) return
+    const order = orders.find(o => o.id === id)
+    await releaseIfActive(order)
     await deleteDoc(doc(db, 'orders', id))
     toast.success('Order deleted')
   }
 
   const deleteMonthOrders = async (monthOrders) => {
     if (!confirm(`Delete all ${monthOrders.length} orders in this month? This cannot be undone.`)) return
+    // Release any active reservations first (sequential, since each is its
+    // own transaction touching potentially-overlapping product docs).
+    for (const o of monthOrders) {
+      await releaseIfActive(o)
+    }
     const batch = writeBatch(db)
     monthOrders.forEach(o => batch.delete(doc(db, 'orders', o.id)))
     await batch.commit()
@@ -591,6 +638,9 @@ export default function AdminPage() {
     if (!confirm('Are you absolutely sure? All order history will be lost.')) return
     setDeletingAll(true)
     try {
+      for (const o of orders) {
+        await releaseIfActive(o)
+      }
       const batch = writeBatch(db)
       orders.forEach(o => batch.delete(doc(db, 'orders', o.id)))
       await batch.commit()
