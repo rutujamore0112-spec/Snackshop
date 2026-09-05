@@ -182,12 +182,12 @@ export default function ProductCard({ product }) {
                 color:
                   available <= 1
                     ? '#ef4444'
-                    : '#87CEEB',
+                    : '#f59e0b',
 
                 background:
                   available <= 1
                     ? '#2c1212'
-                    : 'rgba(135, 206, 235, 0.1)',
+                    : '#261c0c',
 
                 borderRadius: 6,
                 display: 'inline-block',
