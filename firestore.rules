@@ -1,0 +1,305 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed data model
+    // ===============================================================
+    // users: name/email/role/createdAt required; photoURL optional.
+    // products: name/category/price/stock required; stockMax, reserved,
+    //   and imageUrl optional for compatibility with older products.
+    // orders: customerName/userId/items/total/status/paymentMethod/createdAt
+    //   required; reservationActive is required for new orders; expiresAt is
+    //   required for new UPI drafts; cancelledBy is added when cancelled.
+    // requests: userId/customerName/message/status/resolved/createdAt required;
+    //   completedAt is added by an admin.
+    // ledger: spent/earned/self/note/createdAt required.
+    // settings: open required.
+
+    // ===============================================================
+    // Authentication and shared validation helpers
+    // ===============================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == 'rutujamore0112@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['name', 'email', 'role', 'createdAt'])
+        && data.keys().hasOnly(['name', 'email', 'photoURL', 'role', 'createdAt'])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 100
+        && data.email is string
+        && data.email.size() > 3
+        && data.email.size() <= 254
+        && data.email.matches('^[^@]+@[^@]+\\.[^@]+$')
+        && data.role in ['customer', 'admin']
+        && data.createdAt is timestamp
+        && (!('photoURL' in data)
+          || (data.photoURL is string && data.photoURL.size() <= 2048));
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'category', 'price', 'stock'])
+        && data.keys().hasOnly([
+          'name', 'category', 'price', 'stock', 'stockMax', 'reserved', 'imageUrl'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 120
+        && data.category is string
+        && data.category.size() > 0
+        && data.category.size() <= 50
+        && data.price is number
+        && data.price >= 0
+        && data.price <= 100000
+        && data.stock is number
+        && data.stock >= 0
+        && data.stock <= 100000
+        && (!('stockMax' in data)
+          || (data.stockMax is number && data.stockMax >= 0 && data.stockMax <= 100000))
+        && (!('reserved' in data)
+          || (data.reserved is number && data.reserved >= 0 && data.reserved <= data.stock))
+        && (!('imageUrl' in data)
+          || (data.imageUrl is string && data.imageUrl.size() <= 2048));
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'customerName', 'userId', 'items', 'total',
+          'status', 'paymentMethod', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'customerName', 'userId', 'items', 'total', 'status',
+          'paymentMethod', 'createdAt', 'expiresAt',
+          'reservationActive', 'cancelledBy'
+        ])
+        && data.customerName is string
+        && data.customerName.size() > 0
+        && data.customerName.size() <= 100
+        && data.userId is string
+        && data.userId.size() > 0
+        && data.userId.size() <= 128
+        && data.items is list
+        && data.items.size() > 0
+        && data.items.size() <= 50
+        && data.total is number
+        && data.total > 0
+        && data.total <= 50000
+        && data.status in ['draft', 'pending', 'utr_submitted', 'paid', 'cancelled']
+        && data.paymentMethod in ['upi', 'cash']
+        && data.createdAt is timestamp
+        && (!('expiresAt' in data) || data.expiresAt is timestamp)
+        && (!('reservationActive' in data) || data.reservationActive is bool)
+        && (!('cancelledBy' in data)
+          || (data.cancelledBy is string
+            && data.cancelledBy in ['customer', 'admin', 'timeout']));
+    }
+
+    function immutableOrderFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'customerName', 'userId', 'items', 'total',
+        'paymentMethod', 'createdAt', 'expiresAt'
+      ]);
+    }
+
+    function isValidRequest(data) {
+      return data.keys().hasAll([
+          'userId', 'customerName', 'message', 'status', 'resolved', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'customerName', 'message', 'status',
+          'resolved', 'createdAt', 'completedAt'
+        ])
+        && data.userId is string
+        && data.userId.size() > 0
+        && data.userId.size() <= 128
+        && data.customerName is string
+        && data.customerName.size() > 0
+        && data.customerName.size() <= 100
+        && data.message is string
+        && data.message.size() > 0
+        && data.message.size() < 500
+        && data.status in ['pending', 'in_progress', 'completed']
+        && data.resolved is bool
+        && data.createdAt is timestamp
+        && (!('completedAt' in data) || data.completedAt is timestamp);
+    }
+
+    function isValidLedgerEntry(data) {
+      return data.keys().hasAll(['spent', 'earned', 'self', 'note', 'createdAt'])
+        && data.keys().hasOnly(['spent', 'earned', 'self', 'note', 'createdAt'])
+        && data.spent is number
+        && data.spent >= 0
+        && data.spent <= 100000000
+        && data.earned is number
+        && data.earned >= 0
+        && data.earned <= 100000000
+        && data.self is number
+        && data.self >= 0
+        && data.self <= 100000000
+        && data.note is string
+        && data.note.size() <= 500
+        && data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Collection rules
+    // ===============================================================
+    match /users/{userId} {
+      allow create: if isOwner(userId)
+        && isValidUser(request.resource.data)
+        && request.resource.data.role == 'customer'
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if isOwner(userId) || isAdmin();
+
+      allow update: if isAdmin()
+        && isValidUser(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if isSignedIn();
+
+      allow create: if isAdmin() && isValidProduct(request.resource.data);
+      allow update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+
+      // Temporary client-side reservation compatibility. This remains a
+      // replay risk because rules cannot reliably bind an arbitrary product
+      // counter update to one order item. Move this write to trusted server
+      // code before treating inventory as security-sensitive.
+      allow update: if isSignedIn()
+        && isValidProduct(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reserved'])
+        && request.resource.data.reserved is number
+        && request.resource.data.reserved >= 0
+        && request.resource.data.reserved <= resource.data.stock
+        && (
+          (!('reserved' in resource.data)
+            && request.resource.data.reserved <= 50)
+          ||
+          ('reserved' in resource.data
+            && (request.resource.data.reserved - resource.data.reserved) >= -50
+            && (request.resource.data.reserved - resource.data.reserved) <= 50)
+        );
+    }
+
+    match /orders/{orderId} {
+      allow create: if isSignedIn()
+        && isValidOrder(request.resource.data)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.reservationActive is bool
+        && (
+          (request.resource.data.paymentMethod == 'cash'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.reservationActive == true
+            && !('expiresAt' in request.resource.data))
+          ||
+          (request.resource.data.paymentMethod == 'upi'
+            && request.resource.data.status == 'draft'
+            && request.resource.data.reservationActive == false
+            && request.resource.data.expiresAt is timestamp
+            && request.resource.data.expiresAt > request.time
+            && request.resource.data.expiresAt <= request.time + duration.value(3, 'm'))
+        );
+
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow update: if isAdmin() && isValidOrder(request.resource.data);
+      allow delete: if isAdmin();
+
+      // Customer submits a still-valid UPI payment. The same transaction
+      // activates the product reservation.
+      allow update: if isOwner(resource.data.userId)
+        && isValidOrder(request.resource.data)
+        && immutableOrderFieldsUnchanged()
+        && resource.data.paymentMethod == 'upi'
+        && resource.data.status == 'draft'
+        && resource.data.reservationActive == false
+        && resource.data.expiresAt > request.time
+        && request.resource.data.status == 'utr_submitted'
+        && request.resource.data.reservationActive == true
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'reservationActive']);
+
+      // Customer explicitly cancels an active order.
+      allow update: if isOwner(resource.data.userId)
+        && isValidOrder(request.resource.data)
+        && immutableOrderFieldsUnchanged()
+        && resource.data.status in ['draft', 'pending', 'utr_submitted']
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.cancelledBy == 'customer'
+        && request.resource.data.reservationActive == false
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'cancelledBy', 'reservationActive']);
+
+      // Automatic timeout is allowed only after this user's draft deadline.
+      allow update: if isOwner(resource.data.userId)
+        && isValidOrder(request.resource.data)
+        && immutableOrderFieldsUnchanged()
+        && resource.data.status == 'draft'
+        && (
+          (resource.data.expiresAt is timestamp
+            && resource.data.expiresAt <= request.time)
+          ||
+          (!('expiresAt' in resource.data)
+            && resource.data.createdAt <= request.time - duration.value(2, 'm'))
+        )
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.cancelledBy == 'timeout'
+        && request.resource.data.reservationActive == false
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'cancelledBy', 'reservationActive']);
+    }
+
+    match /requests/{requestId} {
+      allow create: if isSignedIn()
+        && isValidRequest(request.resource.data)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.resolved == false
+        && request.resource.data.createdAt == request.time
+        && !('completedAt' in request.resource.data);
+
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow update: if isAdmin()
+        && isValidRequest(request.resource.data)
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /ledger/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() && isValidLedgerEntry(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasAll(['open'])
+        && request.resource.data.keys().hasOnly(['open'])
+        && request.resource.data.open is bool;
+      allow delete: if false;
+    }
+  }
+}
