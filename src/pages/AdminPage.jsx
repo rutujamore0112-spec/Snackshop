@@ -4,13 +4,14 @@ import { Plus, Edit2, Trash2, Check, X, LogOut, Package, MessageSquare, Shopping
 import toast from 'react-hot-toast'
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, orderBy, query, writeBatch, getDoc, setDoc, serverTimestamp, runTransaction
+  doc, orderBy, query, writeBatch, getDoc, setDoc, serverTimestamp
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { signOut, onAuthStateChanged } from 'firebase/auth'
 import { motion, AnimatePresence } from 'framer-motion'
 import { db, auth, storage } from '../lib/firebase'
 import Ledger from '../components/Ledger'
+import { updateOrderStatus } from '../lib/orders'
 
 const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen']
 
@@ -138,7 +139,7 @@ function groupByMonth(orders) {
 function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete, onDeleteAll }) {
   const [collapsed, setCollapsed] = useState(false)
   const paidTotal = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const pendingCount = orders.filter(o => o.status === 'utr_submitted' || o.status === 'pending').length
+  const pendingCount = orders.filter(o => ACTIVE_RESERVING_STATUSES.includes(o.status)).length
 
   return (
     <div style={{ marginBottom: 20 }}>
@@ -179,7 +180,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
             style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}
           >
             {orders.map(o => {
-              const needsAction = o.status === 'utr_submitted' || o.status === 'pending'
+              const needsAction = ACTIVE_RESERVING_STATUSES.includes(o.status)
               const isProcessing = processing[o.id]
               return (
                 <motion.div 
@@ -215,7 +216,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                       <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 18 }}>₹{o.total}</div>
                       <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 100, background: o.status === 'paid' ? 'var(--success-dim)' : o.status === 'cancelled' ? 'var(--danger-dim)' : o.status === 'utr_submitted' ? 'var(--accent-dim)' : 'var(--warning-dim)', color: o.status === 'paid' ? 'var(--success)' : o.status === 'cancelled' ? 'var(--danger)' : o.status === 'utr_submitted' ? 'var(--accent)' : 'var(--warning)' }}>
-                        {o.status === 'utr_submitted' ? 'pending verify' : o.status}
+                        {o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'pending verify' : o.status}
                       </span>
                       {o.status === 'cancelled' && o.cancelledBy && (
                         <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>
@@ -238,12 +239,14 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => onMarkPaid(o)}
-                        disabled={isProcessing}
+                        disabled={isProcessing || o.status === 'draft'}
                         style={{ flex: 1, padding: 10, background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 8, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 700, fontSize: 13, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
                       >
                         {isProcessing
                           ? 'Processing...'
-                          : o.status === 'pending'
+                          : o.status === 'draft'
+                            ? 'Awaiting payment'
+                            : o.paymentMethod === 'cash'
                             ? 'Accept Cash — deduct stock'
                             : 'Mark as Paid — deduct stock'}
                       </motion.button>
@@ -431,19 +434,19 @@ export default function AdminPage() {
         if (!isInitialOrdersLoad.current) {
           snap.docChanges().forEach(change => {
             const data = change.doc.data()
-            if (change.type === 'added' && data.status === 'pending') {
+            if (change.type === 'added' && ACTIVE_RESERVING_STATUSES.includes(data.status)) {
               toast(`🛎️ New order from ${data.customerName}`)
             }
-            if (change.type === 'modified' && data.status === 'utr_submitted') {
+            if (change.type === 'modified' && (data.status === 'utr_submitted' || data.status === 'pending')) {
               toast(`Payment submitted by ${data.customerName}`)
             }
           })
         }
         isInitialOrdersLoad.current = false
         const allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setOrders(allOrders.filter(o => o.status !== 'draft'))
+        setOrders(allOrders)
       },
-      err => console.error('Orders error:', err)
+      err => { console.error('Orders error:', err); toast.error('Could not load orders. Check your connection and Firebase permissions.') }
     )
 
     const rUnsub = onSnapshot(
@@ -472,7 +475,7 @@ export default function AdminPage() {
 
   const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
   const pendingPayments = orders.filter(o => o.status === 'utr_submitted').length
-  const needsActionCount = orders.filter(o => o.status === 'utr_submitted' || o.status === 'pending').length
+  const needsActionCount = orders.filter(o => ACTIVE_RESERVING_STATUSES.includes(o.status)).length
   const pendingReqs = requests.filter(r => !r.resolved).length
   const monthGroups = groupByMonth(orders)
   const requestMonthGroups = groupByMonth(requests)
@@ -516,28 +519,7 @@ export default function AdminPage() {
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
-      await runTransaction(db, async (tx) => {
-        const orderRef = doc(db, 'orders', order.id)
-        const items = order.items || []
-
-        const productRefs = items
-          .filter(item => item.productId)
-          .map(item => doc(db, 'products', item.productId))
-        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
-
-        const withProductId = items.filter(item => item.productId)
-
-        productSnaps.forEach((pSnap, i) => {
-          if (!pSnap.exists()) return
-          const pData = pSnap.data()
-          const qty = withProductId[i]?.qty || 0
-          const newStock = Math.max(0, (pData.stock || 0) - qty)
-          const newReserved = Math.max(0, (pData.reserved || 0) - qty)
-          tx.update(productRefs[i], { stock: newStock, reserved: newReserved })
-        })
-
-        tx.update(orderRef, { status: 'paid' })
-      })
+      await updateOrderStatus(order.id, 'paid')
       toast.success(`Confirmed for ${order.customerName} — stock updated`)
     } catch (err) {
       toast.error(`Failed: ${err.message}`)
@@ -549,27 +531,7 @@ export default function AdminPage() {
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
-      await runTransaction(db, async (tx) => {
-        const orderRef = doc(db, 'orders', order.id)
-        const items = order.items || []
-
-        const productRefs = items
-          .filter(item => item.productId)
-          .map(item => doc(db, 'products', item.productId))
-        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
-
-        const withProductId = items.filter(item => item.productId)
-
-        productSnaps.forEach((pSnap, i) => {
-          if (!pSnap.exists()) return
-          const pData = pSnap.data()
-          const qty = withProductId[i]?.qty || 0
-          const newReserved = Math.max(0, (pData.reserved || 0) - qty)
-          tx.update(productRefs[i], { reserved: newReserved })
-        })
-
-        tx.update(orderRef, { status: 'cancelled', cancelledBy: 'admin' })
-      })
+      await updateOrderStatus(order.id, 'cancelled', 'admin')
       toast('Order rejected')
     } catch (err) {
       toast.error(`Failed: ${err.message}`)
@@ -584,70 +546,34 @@ export default function AdminPage() {
   // settled, so this is a no-op for them. This must run BEFORE the
   // order doc is deleted — once deleted, there's no way to know what
   // to release.
-  const releaseIfActive = async (order) => {
-    if (!order || !ACTIVE_RESERVING_STATUSES.includes(order.status)) return
-
-    const items = order.items || []
-    const withProductId = items.filter(it => it.productId)
-    if (withProductId.length === 0) return
-
-    const productRefs = withProductId.map(it => doc(db, 'products', it.productId))
-
-    try {
-      await runTransaction(db, async (tx) => {
-        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
-        productSnaps.forEach((snap, i) => {
-          if (!snap.exists()) return
-          const data = snap.data()
-          const qty = withProductId[i]?.qty || 0
-          const newReserved = Math.max(0, (data.reserved || 0) - qty)
-          tx.update(productRefs[i], { reserved: newReserved })
-        })
-      })
-    } catch (err) {
-      console.error(`Could not release reservation for order ${order.id}:`, err)
-      // Don't block the delete on this — surface it, but proceed. Worst case
-      // an admin has to manually zero out `reserved` on the product later.
-      toast.error(`Warning: stock for this order may not have released (${err.message})`)
-    }
+  const deleteOrders = async (selected) => {
+    for (const order of selected) await updateOrderStatus(order.id, 'delete')
   }
 
   const deleteOrder = async (id) => {
     if (!confirm('Delete this order permanently?')) return
-    const order = orders.find(o => o.id === id)
-    await releaseIfActive(order)
-    await deleteDoc(doc(db, 'orders', id))
-    toast.success('Order deleted')
+    try {
+      await updateOrderStatus(id, 'delete')
+      toast.success('Order deleted')
+    } catch (err) { toast.error('Could not delete order: ' + err.message) }
   }
 
   const deleteMonthOrders = async (monthOrders) => {
-    if (!confirm(`Delete all ${monthOrders.length} orders in this month? This cannot be undone.`)) return
-    // Release any active reservations first (sequential, since each is its
-    // own transaction touching potentially-overlapping product docs).
-    for (const o of monthOrders) {
-      await releaseIfActive(o)
-    }
-    const batch = writeBatch(db)
-    monthOrders.forEach(o => batch.delete(doc(db, 'orders', o.id)))
-    await batch.commit()
-    toast.success(`${monthOrders.length} orders deleted`)
+    if (!confirm('Delete all ' + monthOrders.length + ' orders in this month? This cannot be undone.')) return
+    try {
+      await deleteOrders(monthOrders)
+      toast.success(monthOrders.length + ' orders deleted')
+    } catch (err) { toast.error('Deletion stopped: ' + err.message) }
   }
 
   const deleteAllOrders = async () => {
-    if (!confirm(`DELETE ALL ${orders.length} ORDERS PERMANENTLY? This cannot be undone.`)) return
+    if (!confirm('DELETE ALL ' + orders.length + ' ORDERS PERMANENTLY? This cannot be undone.')) return
     if (!confirm('Are you absolutely sure? All order history will be lost.')) return
     setDeletingAll(true)
     try {
-      for (const o of orders) {
-        await releaseIfActive(o)
-      }
-      const batch = writeBatch(db)
-      orders.forEach(o => batch.delete(doc(db, 'orders', o.id)))
-      await batch.commit()
+      await deleteOrders(orders)
       toast.success('All orders deleted')
-    } catch (err) {
-      toast.error(`Failed: ${err.message}`)
-    }
+    } catch (err) { toast.error('Deletion stopped: ' + err.message) }
     setDeletingAll(false)
   }
 

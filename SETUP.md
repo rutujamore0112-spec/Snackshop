@@ -18,7 +18,7 @@ STEP 2 — Add your admin user (if not done yet)
 
 1. Left sidebar → Authentication → Users tab
 2. Click "Add user"
-3. Enter: abhinavmandal68@gmail.com + a password you choose
+3. Enter: rutujamore0112@gmail.com + a password you choose
 4. Click "Add user"
    → This is what you use to login at /admin
 

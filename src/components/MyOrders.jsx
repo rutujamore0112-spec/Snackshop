@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react'
 import { Package, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Banknote, QrCode, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { collection, query, where, onSnapshot, orderBy, doc, runTransaction } from 'firebase/firestore'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { updateOrderStatus } from '../lib/orders'
+import { ACTIVE_ORDER_STATUSES } from '../lib/orderLifecycle.mjs'
 import { useAuth } from '../lib/AuthContext'
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
 
 // ── Status config — mirrors AdminPage.jsx order statuses ────────
 const ORDER_STATUSES = {
-  pending:       { label: 'Awaiting confirmation', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock,       hint: 'Abhinav will verify and confirm your order shortly.' },
-  utr_submitted: { label: 'Awaiting confirmation', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock,       hint: 'Payment received — verifying now.' },
+  draft: { label: 'Awaiting payment', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock, hint: 'Payment not submitted. Cancel this order to release reserved stock.' },
+  pending:       { label: 'Awaiting confirmation', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock,       hint: 'Rutuja will verify and confirm your order shortly.' },
+  utr_submitted: { label: 'Awaiting confirmation', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock,       hint: 'Rutuja will verify your payment and confirm your order.' },
   paid:          { label: 'Confirmed',             color: 'var(--success)', dim: 'var(--success-dim)', Icon: CheckCircle, hint: 'Order confirmed! See you soon.' },
   cancelled:     { label: 'Cancelled',             color: 'var(--danger)',  dim: 'var(--danger-dim)',  Icon: XCircle,     hint: 'This order was cancelled.' },
 }
@@ -34,32 +37,13 @@ function OrderCard({ order }) {
   const cfg = ORDER_STATUSES[order.status] || ORDER_STATUSES.pending
   const MethodIcon = order.paymentMethod === 'cash' ? Banknote : QrCode
   const [cancelling, setCancelling] = useState(false)
-  const canCancel = order.status === 'pending' || order.status === 'utr_submitted'
+  const canCancel = ACTIVE_ORDER_STATUSES.includes(order.status)
 
   const handleCancel = async () => {
     if (!confirm('Cancel this order?')) return
     setCancelling(true)
     try {
-      await runTransaction(db, async (tx) => {
-        const orderRef = doc(db, 'orders', order.id)
-        const orderSnap = await tx.get(orderRef)
-        if (!orderSnap.exists()) return
-        const orderData = orderSnap.data()
-
-        const productRefs = (orderData.items || [])
-          .filter(it => it.productId)
-          .map(it => doc(db, 'products', it.productId))
-        const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
-
-        productSnaps.forEach((snap, i) => {
-          if (!snap.exists()) return
-          const data = snap.data()
-          const qty = orderData.items[i]?.qty || 0
-          tx.update(productRefs[i], { reserved: Math.max(0, (data.reserved || 0) - qty) })
-        })
-
-        tx.update(orderRef, { status: 'cancelled', cancelledBy: 'customer' })
-      })
+      await updateOrderStatus(order.id, 'cancelled', 'customer')
       toast.success('Order cancelled')
     } catch (err) {
       toast.error(`Could not cancel: ${err.message}`)
@@ -122,11 +106,10 @@ export default function MyOrders() {
     if (!user?.uid) return
     const q = query(
       collection(db, 'orders'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
+      where('userId', '==', user.uid)
     )
     const unsub = onSnapshot(q, snap => {
-      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)))
     }, err => console.error('Orders listener:', err))
     return unsub
   }, [user?.uid])
@@ -136,6 +119,7 @@ export default function MyOrders() {
   // is never deleted, so admin's dashboard still sees everything forever.
   const recentOrders = orders.filter(o => {
     const created = o.createdAt?.toDate?.()
+    if (ACTIVE_ORDER_STATUSES.includes(o.status)) return true
     if (!created) return true // still resolving serverTimestamp, show it for now
     return Date.now() - created.getTime() < TWENTY_FOUR_HOURS_MS
   })
