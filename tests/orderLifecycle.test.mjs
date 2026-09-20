@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { transitionOrder } from '../src/lib/orderLifecycle.mjs'
+import { isExpiredDraft, transitionOrder } from '../src/lib/orderLifecycle.mjs'
 
-function fixture(status = 'draft', items = [{ productId: 'p', qty: 2 }]) {
-  let data = { order: { status, paymentMethod: 'upi', items }, p: { stock: 10, reserved: 5 } }
+function fixture(status = 'draft', items = [{ productId: 'p', qty: 2 }], orderOverrides = {}) {
+  let data = { order: { status, paymentMethod: 'upi', items, ...orderOverrides }, p: { stock: 10, reserved: 5 } }
   return {
     read: () => structuredClone(data),
     async act(status, failCommit = false) {
@@ -33,6 +33,49 @@ test('UPI submission preserves reservation and moves to admin verification', asy
   assert.deepEqual(f.read().p, { stock: 8, reserved: 3 })
   await f.act('paid')
   assert.deepEqual(f.read().p, { stock: 8, reserved: 3 })
+})
+
+test('new UPI drafts reserve stock only when payment is submitted', async () => {
+  const f = fixture('draft', [{ productId: 'p', qty: 2 }], {
+    reservationActive: false,
+    expiresAt: Date.now() + 60_000,
+  })
+  await f.act('utr_submitted')
+  assert.equal(f.read().order.status, 'utr_submitted')
+  assert.equal(f.read().order.reservationActive, true)
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 7 })
+  await f.act('paid')
+  assert.deepEqual(f.read().p, { stock: 8, reserved: 5 })
+})
+
+test('timed-out new drafts auto-cancel without changing available stock', async () => {
+  const f = fixture('draft', [{ productId: 'p', qty: 2 }], {
+    reservationActive: false,
+    expiresAt: Date.now() - 1,
+  })
+  assert.equal(isExpiredDraft(f.read().order), true)
+  await f.act('expire')
+  assert.equal(f.read().order.status, 'cancelled')
+  assert.equal(f.read().order.cancelledBy, 'timeout')
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 5 })
+})
+
+test('timed-out legacy drafts release their existing reservation', async () => {
+  const f = fixture('draft', [{ productId: 'p', qty: 2 }], { expiresAt: Date.now() - 1 })
+  await f.act('expire')
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 3 })
+  await f.act('expire')
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 3 })
+})
+
+test('late payment submission atomically cancels an expired draft', async () => {
+  const f = fixture('draft', [{ productId: 'p', qty: 2 }], {
+    reservationActive: false,
+    expiresAt: Date.now() - 1,
+  })
+  const result = await f.act('utr_submitted')
+  assert.equal(f.read().order.status, 'cancelled')
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 5 })
 })
 
 test('cancelled drafts cannot be revived by late payment submission', async () => {

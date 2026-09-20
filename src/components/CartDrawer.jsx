@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Trash2, CheckCircle, Copy, ArrowRight, Banknote, QrCode, Clock, XCircle, ShoppingCart } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { collection, doc, serverTimestamp, runTransaction } from 'firebase/firestore'
+import { collection, doc, serverTimestamp, runTransaction, Timestamp } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useCart } from '../lib/CartContext'
 import { useAuth } from '../lib/AuthContext'
@@ -27,14 +27,15 @@ export default function CartDrawer({ products, open, onClose }) {
 
   const [secondsLeft, setSecondsLeft] = useState(TIMER_SECONDS)
   const timerRef = useRef(null)
+  const deadlineRef = useRef(null)
 
   const cartProducts = products.filter(p => items[p.id])
   const total = cartProducts.reduce((s, p) => s + p.price * items[p.id], 0)
 
   useEffect(() => {
     if (step !== 'qr') return
-    const deadline = Date.now() + TIMER_SECONDS * 1000
-    setSecondsLeft(TIMER_SECONDS)
+    const deadline = deadlineRef.current || Date.now() + TIMER_SECONDS * 1000
+    setSecondsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)))
     timerRef.current = setInterval(() => {
       const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
       setSecondsLeft(remaining)
@@ -78,6 +79,7 @@ export default function CartDrawer({ products, open, onClose }) {
     }))
 
     const orderRef = doc(collection(db, 'orders'))
+    const expiresAtMillis = Date.now() + TIMER_SECONDS * 1000
 
     try {
       await runTransaction(db, async (tx) => {
@@ -97,24 +99,28 @@ export default function CartDrawer({ products, open, onClose }) {
           }
         }
 
-        productSnaps.forEach((snap, i) => {
-          const data = snap.data()
-          tx.update(productRefs[i], { reserved: (data.reserved || 0) + orderItems[i].qty })
-        })
+        if (paymentMethod === 'cash') {
+          productSnaps.forEach((snap, i) => {
+            const data = snap.data()
+            tx.update(productRefs[i], { reserved: (data.reserved || 0) + orderItems[i].qty })
+          })
+        }
 
         tx.set(orderRef, {
           customerName, 
           userId: user?.uid || profile?.id || null, 
           items: orderItems, 
           total,
-          // Drafts reserve stock and remain visible to admin until payment or cancellation.
           status: paymentMethod === 'upi' ? 'draft' : 'pending', 
+          reservationActive: paymentMethod === 'cash',
           paymentMethod, 
           createdAt: serverTimestamp(),
+          ...(paymentMethod === 'upi' ? { expiresAt: Timestamp.fromMillis(expiresAtMillis) } : {}),
         })
       })
 
       setOrderId(orderRef.id)
+      deadlineRef.current = paymentMethod === 'upi' ? expiresAtMillis : null
       setFinalTotal(total)
       setFinalName(customerName)
       return orderRef.id
@@ -146,7 +152,14 @@ export default function CartDrawer({ products, open, onClose }) {
     busyRef.current = true
     setSubmitting(true)
     try {
-      await updateOrderStatus(orderId, 'utr_submitted')
+      const result = await updateOrderStatus(orderId, 'utr_submitted')
+      if (result === 'expired') {
+        setStep('cart')
+        setOrderId(null)
+        deadlineRef.current = null
+        toast.error('Payment window expired — order cancelled')
+        return
+      }
       clearInterval(timerRef.current)
       clearCart()
       setStep('done')
@@ -187,12 +200,28 @@ export default function CartDrawer({ products, open, onClose }) {
   }
 
   const handleAutoCancel = async () => {
-    if (await handleCancelOrder()) toast('Payment window expired')
+    if (!orderId || busyRef.current) return
+    busyRef.current = true
+    setCancelling(true)
+    try {
+      await updateOrderStatus(orderId, 'expire')
+      toast('Payment window expired — order cancelled')
+      setStep('cart')
+      setOrderId(null)
+      deadlineRef.current = null
+    } catch (err) {
+      console.error('Could not expire order:', err)
+      toast.error('Could not cancel the expired order. Please retry from My orders.')
+    } finally {
+      busyRef.current = false
+      setCancelling(false)
+    }
   }
 
   const resetAndClose = (keepCart = true) => {
     setStep('cart')
     setOrderId(null)
+    deadlineRef.current = null
     if (!keepCart) clearCart()
     onClose()
   }

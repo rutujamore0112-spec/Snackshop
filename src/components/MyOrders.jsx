@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { updateOrderStatus } from '../lib/orders'
-import { ACTIVE_ORDER_STATUSES } from '../lib/orderLifecycle.mjs'
+import { ACTIVE_ORDER_STATUSES, isExpiredDraft } from '../lib/orderLifecycle.mjs'
 import { useAuth } from '../lib/AuthContext'
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
@@ -113,6 +113,17 @@ export default function MyOrders() {
     }, err => console.error('Orders listener:', err))
     return unsub
   }, [user?.uid])
+
+  useEffect(() => {
+    const expireDrafts = () => {
+      orders.filter(order => isExpiredDraft(order)).forEach(order => {
+        updateOrderStatus(order.id, 'expire').catch(err => console.error('Order expiry:', err))
+      })
+    }
+    expireDrafts()
+    const timer = setInterval(expireDrafts, 5000)
+    return () => clearInterval(timer)
+  }, [orders])
 
   // Only show orders placed in the last 24 hours — this is purely a
   // display filter on the customer's own view. The order document itself

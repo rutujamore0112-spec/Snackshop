@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { db, auth, storage } from '../lib/firebase'
 import Ledger from '../components/Ledger'
 import { updateOrderStatus } from '../lib/orders'
+import { isExpiredDraft } from '../lib/orderLifecycle.mjs'
 
 const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen']
 
@@ -461,6 +462,17 @@ export default function AdminPage() {
 
     return () => { unsub(); pUnsub(); oUnsub(); rUnsub(); sUnsub() }
   }, [])
+
+  useEffect(() => {
+    const expireDrafts = () => {
+      orders.filter(order => isExpiredDraft(order)).forEach(order => {
+        updateOrderStatus(order.id, 'expire').catch(err => console.error('Order expiry:', err))
+      })
+    }
+    expireDrafts()
+    const timer = setInterval(expireDrafts, 5000)
+    return () => clearInterval(timer)
+  }, [orders])
 
   const toggleShopStatus = async () => {
     setTogglingShop(true)
