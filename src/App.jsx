@@ -59,15 +59,15 @@ export default function App() {
         position="bottom-center"
         toastOptions={{
           style: {
-            background: '#222',
-            color: '#f0ede8',
-            border: '1px solid rgba(255,255,255,0.1)',
+            background: 'var(--surface)',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
             borderRadius: '100px',
             fontSize: '13px',
             fontFamily: 'DM Sans, sans-serif',
             padding: '10px 18px',
           },
-          success: { iconTheme: { primary: '#f5c842', secondary: '#1a1200' } },
+          success: { iconTheme: { primary: 'var(--accent)', secondary: 'var(--accent-text)' } },
         }}
       />
       <AppRoutes />

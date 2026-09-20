@@ -78,7 +78,7 @@ export default function ProductCard({ product }) {
             style={{
               fontSize: 12,
               fontWeight: 700,
-              color: 'rgba(255,255,255,0.15)',
+              color: 'var(--text-hint)',
               transform: 'rotate(-35deg)',
               letterSpacing: '0.08em',
             }}
@@ -144,7 +144,7 @@ export default function ProductCard({ product }) {
             style={{
               fontFamily: 'Syne',
               fontWeight: 700,
-              color: '#ffffff',
+              color: 'var(--text)',
               margin: 0,
               lineHeight: 1.3,
               display: '-webkit-box',
@@ -164,7 +164,7 @@ export default function ProductCard({ product }) {
           style={{
             fontFamily: 'Syne',
             fontWeight: 800,
-            color: '#87CEEB',
+            color: 'var(--accent)',
           }}
         >
           ₹{product.price}
@@ -238,8 +238,8 @@ export default function ProductCard({ product }) {
                 className="product-add-button"
                 style={{
                   width: '100%',
-                  background: '#87CEEB',
-                  color: '#000000',
+                  background: 'var(--accent)',
+                  color: 'var(--accent-text)',
                   border: 'none',
                   borderRadius: 8,
                   fontFamily: 'Syne',
@@ -264,7 +264,7 @@ export default function ProductCard({ product }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: '#87CEEB',
+                background: 'var(--accent)',
                 borderRadius: 8,
                 width: '100%',
                 padding: '4px 0',
@@ -277,7 +277,7 @@ export default function ProductCard({ product }) {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#000',
+                  color: 'var(--accent-text)',
                   cursor: 'pointer',
                   fontWeight: 700,
                   flex: 1,
@@ -291,7 +291,7 @@ export default function ProductCard({ product }) {
                 className="quantity-number"
                 style={{
                   fontWeight: 700,
-                  color: '#000',
+                  color: 'var(--accent-text)',
                   textAlign: 'center',
                   flex: 1,
                 }}
@@ -305,7 +305,7 @@ export default function ProductCard({ product }) {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#000',
+                  color: 'var(--accent-text)',
                   cursor: 'pointer',
                   fontWeight: 700,
                   flex: 1,

@@ -1,184 +1,114 @@
-import { useState, useEffect } from 'react'
-import { Wallet, Plus, Trash2, TrendingUp, TrendingDown } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Plus, Search, ShoppingBag, Trash2, Wallet, X } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore'
 import toast from 'react-hot-toast'
-import {
-  collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, orderBy, query, serverTimestamp,
-} from 'firebase/firestore'
 import { db } from '../lib/firebase'
 
-function StatBox({ label, value, color }) {
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '12px 14px', minWidth: 0 }}>
-      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
-      <div style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 18, color: color || 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
-    </div>
-  )
+const TYPES = {
+  spent: { label: 'Stock purchase', short: 'Spent' },
+  earned: { label: 'Other income', short: 'Income' },
+  self: { label: 'Self-use', short: 'Self' },
+  refund: { label: 'Supplier refund', short: 'Refund' },
+}
+const money = value => `₹${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+const asDate = value => {
+  if (!value) return new Date(0)
+  if (typeof value.toDate === 'function') return value.toDate()
+  if (typeof value.toMillis === 'function') return new Date(value.toMillis())
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(`${value}T12:00:00`)
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? new Date(0) : date
+}
+const itemDate = item => asDate(item.transactionDate || item.createdAt)
+
+function Totals({ entries, orders }) {
+  const values = { sales: 0, spent: 0, earned: 0, self: 0, refund: 0 }
+  orders.filter(order => order.status === 'paid').forEach(order => { values.sales += Number(order.total || 0) })
+  entries.forEach(entry => {
+    if (entry.type && TYPES[entry.type]) values[entry.type] += Number(entry.amount || 0)
+    else {
+      Object.keys(TYPES).forEach(type => { values[type] += Number(entry[type] || 0) })
+    }
+  })
+  values.profit = values.sales - (values.spent - values.refund)
+  return <div className="finance-stats">
+    {[['Sales from orders', values.sales, 'var(--success)'], ['Stock purchases', values.spent, 'var(--danger)'], ['Supplier refunds', values.refund, 'var(--warning)'], ['Shop profit', values.profit, values.profit >= 0 ? 'var(--accent)' : 'var(--danger)']].map(([label, value, color]) => <div className="finance-stat-box" key={label}><span>{label}</span><strong style={{ color }}>{money(value)}</strong></div>)}
+  </div>
 }
 
-// A single number input that only writes to Firestore on blur / Enter,
-// so typing doesn't spam the database on every keystroke.
-// Shows 0 as an empty field with a faded placeholder rather than a
-// solid "0", since a brand-new entry's zero isn't a real value yet.
-function LiveNumberField({ value, onCommit, placeholder }) {
-  const [local, setLocal] = useState(value ? String(value) : '')
-
-  useEffect(() => { setLocal(value ? String(value) : '') }, [value])
-
-  const commit = () => {
-    const num = local === '' ? 0 : Number(local)
-    if (!isNaN(num) && num !== value) onCommit(num)
+function EntryForm({ saving, onSave, onClose }) {
+  const [draft, setDraft] = useState({ type: 'spent', amount: '', note: '', transactionDate: new Date().toLocaleDateString('en-CA') })
+  const submit = event => {
+    event.preventDefault()
+    const amount = Number(draft.amount)
+    if (!Number.isFinite(amount) || amount <= 0) return toast.error('Enter an amount greater than zero')
+    if (!draft.note.trim()) return toast.error('Add a short description')
+    onSave({ ...draft, amount, note: draft.note.trim() })
   }
-
-  return (
-    <input
-      type="number"
-      inputMode="decimal"
-      className="no-spinner"
-      value={local}
-      placeholder={placeholder || '0'}
-      onChange={e => setLocal(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => { if (e.key === 'Enter') { commit(); e.target.blur() } }}
-      style={{ fontSize: 14, padding: '8px 10px', textAlign: 'right' }}
-    />
-  )
-}
-
-function EntryCard({ entry, onUpdate, onDelete }) {
-  const profit = (entry.earned || 0) - (entry.spent || 0)
-
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
-        <div>
-          <label style={{ fontSize: 10, color: 'var(--text-hint)', display: 'block', marginBottom: 3 }}>Spent</label>
-          <LiveNumberField value={entry.spent} onCommit={v => onUpdate(entry.id, { spent: v })} placeholder="0" />
-        </div>
-        <div>
-          <label style={{ fontSize: 10, color: 'var(--text-hint)', display: 'block', marginBottom: 3 }}>Earned</label>
-          <LiveNumberField value={entry.earned} onCommit={v => onUpdate(entry.id, { earned: v })} placeholder="0" />
-        </div>
-        <div>
-          <label style={{ fontSize: 10, color: 'var(--text-hint)', display: 'block', marginBottom: 3 }}>SELF</label>
-          <LiveNumberField value={entry.self} onCommit={v => onUpdate(entry.id, { self: v })} placeholder="0" />
-        </div>
-      </div>
-
-      <input
-        value={entry.note || ''}
-        onChange={e => onUpdate(entry.id, { note: e.target.value })}
-        placeholder="Note (optional) — e.g. Oreo restock, Diwali order..."
-        style={{ fontSize: 12, padding: '7px 10px', marginBottom: 10 }}
-      />
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: profit >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-          {profit >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-          {profit >= 0 ? '+' : ''}₹{profit} profit
-        </div>
-        <button
-          onClick={() => onDelete(entry.id)}
-          style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '5px 9px', color: 'var(--danger)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-        >
-          <Trash2 size={11} /> Delete
-        </button>
-      </div>
+  return <motion.form className="finance-entry-form" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} onSubmit={submit}>
+    <div className="finance-form-heading"><div><span className="eyebrow">NEW TRANSACTION</span><h3>What changed?</h3></div><button type="button" onClick={onClose} aria-label="Close"><X size={17} /></button></div>
+    <div className="finance-entry-fields">
+      <label>Type<select value={draft.type} onChange={event => setDraft(value => ({ ...value, type: event.target.value }))}>{Object.entries(TYPES).map(([value, type]) => <option key={value} value={value}>{type.label}</option>)}</select></label>
+      <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={draft.amount} onChange={event => setDraft(value => ({ ...value, amount: event.target.value }))} autoFocus /></label>
+      <label>Date<input type="date" value={draft.transactionDate} onChange={event => setDraft(value => ({ ...value, transactionDate: event.target.value }))} /></label>
+      <label className="finance-note-field">Description<input value={draft.note} onChange={event => setDraft(value => ({ ...value, note: event.target.value }))} placeholder="e.g. Wholesale chips restock" /></label>
     </div>
-  )
+    <div className="finance-entry-actions"><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save transaction'}</button></div>
+  </motion.form>
 }
 
-export default function Ledger() {
+export default function Ledger({ orders = [] }) {
   const [entries, setEntries] = useState([])
-  const [adding, setAdding] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [filter, setFilter] = useState('all')
+  const [search, setSearch] = useState('')
 
-  useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'ledger'), orderBy('createdAt', 'desc')),
-      snap => setEntries(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-      err => console.error('Ledger error:', err)
-    )
-    return unsub
-  }, [])
+  useEffect(() => onSnapshot(query(collection(db, 'ledger'), orderBy('createdAt', 'desc')), snap => setEntries(snap.docs.map(entry => ({ id: entry.id, ...entry.data() }))), err => console.error('Ledger error:', err)), [])
 
-  const addEntry = async () => {
-    setAdding(true)
+  const activity = useMemo(() => [
+    ...orders.filter(order => order.status === 'paid').map(order => ({ ...order, kind: 'sale' })),
+    ...entries.map(entry => ({ ...entry, kind: 'ledger' })),
+  ].sort((a, b) => itemDate(b) - itemDate(a)), [entries, orders])
+  const visible = activity.filter(item => {
+    const type = item.kind === 'sale' ? 'sale' : item.type || 'legacy'
+    const haystack = [item.customerName, item.note, ...(item.items || []).map(product => product.name)].filter(Boolean).join(' ').toLowerCase()
+    return (filter === 'all' || filter === type) && haystack.includes(search.trim().toLowerCase())
+  })
+
+  const save = async transaction => {
+    setSaving(true)
     try {
-      await addDoc(collection(db, 'ledger'), {
-        spent: 0,
-        earned: 0,
-        self: 0,
-        note: '',
-        createdAt: serverTimestamp(),
-      })
-    } catch (err) {
-      toast.error(`Failed: ${err.message}`)
-    }
-    setAdding(false)
+      await addDoc(collection(db, 'ledger'), { ...transaction, createdAt: serverTimestamp() })
+      toast.success('Transaction saved')
+      setShowForm(false)
+    } catch (error) { toast.error(`Failed: ${error.message}`) }
+    finally { setSaving(false) }
+  }
+  const remove = async id => {
+    if (!confirm('Delete this finance entry?')) return
+    try { await deleteDoc(doc(db, 'ledger', id)); toast.success('Entry deleted') }
+    catch (error) { toast.error(`Delete failed: ${error.message}`) }
   }
 
-  const updateEntry = async (id, patch) => {
-    try {
-      await updateDoc(doc(db, 'ledger', id), patch)
-    } catch (err) {
-      toast.error(`Save failed: ${err.message}`)
-    }
-  }
-
-  const deleteEntry = async (id) => {
-    if (!confirm('Delete this entry?')) return
-    await deleteDoc(doc(db, 'ledger', id))
-    toast.success('Entry deleted')
-  }
-
-  const totalSpent = entries.reduce((s, e) => s + (e.spent || 0), 0)
-  const totalEarned = entries.reduce((s, e) => s + (e.earned || 0), 0)
-  const totalSelf = entries.reduce((s, e) => s + (e.self || 0), 0)
-  const profit = totalEarned - totalSpent
-
-  return (
-    <div>
-      <style>{`
-        .no-spinner::-webkit-outer-spin-button,
-        .no-spinner::-webkit-inner-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-        .no-spinner {
-          -moz-appearance: textfield;
-        }
-      `}</style>
-
-      {/* Totals */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 20 }}>
-        <StatBox label="Total spent" value={`₹${totalSpent}`} color="var(--danger)" />
-        <StatBox label="Total earned" value={`₹${totalEarned}`} color="var(--success)" />
-        <StatBox label="Profit" value={`${profit >= 0 ? '+' : ''}₹${profit}`} color={profit >= 0 ? 'var(--accent)' : 'var(--danger)'} />
-        <StatBox label="SELF total" value={`₹${totalSelf}`} />
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{entries.length} entr{entries.length === 1 ? 'y' : 'ies'}</p>
-        <button
-          onClick={addEntry}
-          disabled={adding}
-          style={{ padding: '9px 18px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 10, fontFamily: 'Syne', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, opacity: adding ? 0.6 : 1 }}
-        >
-          <Plus size={14} /> Add entry
-        </button>
-      </div>
-
-      {entries.length === 0 ? (
-        <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14, background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-          No entries yet — tap "Add entry" to start tracking.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {entries.map(e => (
-            <EntryCard key={e.id} entry={e} onUpdate={updateEntry} onDelete={deleteEntry} />
-          ))}
-        </div>
-      )}
+  return <div className="finance-ledger">
+    <div className="finance-overview-heading"><div><span className="eyebrow">MONEY IN, MONEY OUT</span><h2>Know what the shop is making.</h2><p>Paid orders become sales automatically. Add purchases, refunds, income, and self-use here.</p></div><button className="finance-add-button" onClick={() => setShowForm(value => !value)}><Plus size={15} /> Add transaction</button></div>
+    <Totals entries={entries} orders={orders} />
+    <AnimatePresence>{showForm && <EntryForm saving={saving} onSave={save} onClose={() => setShowForm(false)} />}</AnimatePresence>
+    <div className="finance-section-heading"><div><h3>Activity</h3><p>{visible.length} of {activity.length} records</p></div><label className="finance-search"><Search size={15} /><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search finance activity" /></label></div>
+    <div className="finance-filters">{[['all', 'All'], ['sale', 'Sales'], ['spent', 'Spent'], ['earned', 'Other income'], ['self', 'Self-use'], ['refund', 'Refunds']].map(([value, label]) => <button key={value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
+    <div className="finance-activity-list">
+      {visible.length === 0 ? <div className="finance-empty"><Wallet size={24} /><strong>No matching activity</strong><p>Try another filter or add a transaction.</p></div> : visible.map(item => {
+        const sale = item.kind === 'sale'
+        const amount = sale ? item.total : item.amount || item.spent || item.earned || item.self || item.refund
+        const positive = sale || item.type === 'earned' || item.type === 'refund'
+        return <motion.div layout className="finance-activity-row" key={`${item.kind}-${item.id}`}>
+          <span className="finance-activity-icon">{sale ? <ShoppingBag size={16} /> : <Wallet size={16} />}</span>
+          <div className="finance-activity-copy"><strong>{sale ? item.customerName || 'Customer order' : item.note || 'Ledger entry'}</strong><p>{sale ? (item.items || []).map(product => `${product.name} ×${product.qty}`).join(', ') : TYPES[item.type]?.label || 'Older entry'}</p><time>{itemDate(item).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</time></div>
+          <div className="finance-activity-values"><strong className={positive ? 'is-positive' : 'is-negative'}>{positive ? '+' : '−'}{money(amount)}</strong>{!sale && <button onClick={() => remove(item.id)}><Trash2 size={14} /><span>Delete</span></button>}</div>
+        </motion.div>
+      })}
     </div>
-  )
+  </div>
 }

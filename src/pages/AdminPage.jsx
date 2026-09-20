@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Edit2, Trash2, Check, X, LogOut, Package, MessageSquare, ShoppingBag, ImageIcon, Upload, Link, ChevronDown, ChevronUp, Clock, Loader, CheckCircle, Wallet, Store, DoorClosed } from 'lucide-react'
+import { Plus, Edit2, Trash2, Check, X, LogOut, Package, MessageSquare, ShoppingBag, ImageIcon, Upload, Link, ChevronDown, ChevronUp, Clock, Loader, CheckCircle, Wallet, Store, DoorClosed, Eye, EyeOff, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
@@ -13,8 +13,10 @@ import { db, auth, storage } from '../lib/firebase'
 import Ledger from '../components/Ledger'
 import { updateOrderStatus } from '../lib/orders'
 import { isExpiredDraft } from '../lib/orderLifecycle.mjs'
+import ThemeToggle from '../components/ThemeToggle'
+import useThemePreference from '../lib/useThemePreference'
 
-const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen']
+const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen', 'drinks']
 
 const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 
@@ -29,15 +31,18 @@ export const REQUEST_STATUSES = {
   completed:   { label: 'Completed',   color: 'var(--success)',  dim: 'var(--success-dim)',  icon: CheckCircle },
 }
 
-function StatCard({ label, value, color }) {
+function StatCard({ label, value, color, maskable = false }) {
+  const [revealed, setRevealed] = useState(false)
+  const hidden = maskable && !revealed
   return (
     <motion.div 
       whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 300 }}
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px 20px' }}
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px 20px', position: 'relative' }}
     >
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 26, color: color || 'var(--accent)' }}>{value}</div>
+      <div style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 26, color: color || 'var(--accent)', filter: hidden ? 'blur(8px)' : 'none', userSelect: hidden ? 'none' : 'auto' }}>{hidden ? '••••••' : value}</div>
+      {maskable && <button onClick={() => setRevealed(value => !value)} title={revealed ? 'Hide revenue' : 'Show revenue'} aria-label={revealed ? 'Hide revenue' : 'Show revenue'} style={{ position: 'absolute', top: 11, right: 11, width: 30, height: 30, display: 'grid', placeItems: 'center', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface2)', color: 'var(--text-secondary)' }}>{revealed ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
     </motion.div>
   )
 }
@@ -395,7 +400,9 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
 
 export default function AdminPage() {
   const navigate = useNavigate()
+  const { theme, toggleTheme } = useThemePreference()
   const [tab, setTab] = useState('products')
+  const [productSearch, setProductSearch] = useState('')
   const [products, setProducts] = useState([])
   const [orders, setOrders] = useState([])
   const [requests, setRequests] = useState([])
@@ -687,8 +694,13 @@ export default function AdminPage() {
     { id: 'finance', label: 'Finance', icon: Wallet },
   ]
 
+  const normalizedProductSearch = productSearch.trim().toLowerCase()
+  const filteredProducts = normalizedProductSearch
+    ? products.filter(product => [product.name, product.category].filter(Boolean).join(' ').toLowerCase().includes(normalizedProductSearch))
+    : products
+
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div className="admin-shell" data-theme={theme} style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <style>{`
         @keyframes badgePulse {
           0%, 100% { box-shadow: 0 0 0 0 rgba(255,159,67,0.55); }
@@ -706,13 +718,14 @@ export default function AdminPage() {
           -moz-appearance: textfield;
         }
       `}</style>
-      <header style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 30 }}>
+      <header className="admin-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 30 }}>
         <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px', height: 58, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 18 }}>SnackShop</span>
             <span style={{ fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '2px 8px', borderRadius: 100, fontWeight: 600 }}>ADMIN</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.95 }}
@@ -748,7 +761,7 @@ export default function AdminPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 28 }}>
           <StatCard label="Total products" value={products.length} />
           <StatCard label="Paid orders" value={orders.filter(o => o.status === 'paid').length} color="var(--success)" />
-          <StatCard label="Revenue" value={`₹${totalRevenue}`} color="var(--accent)" />
+          <StatCard label="Revenue" value={`₹${totalRevenue}`} color="var(--accent)" maskable />
           <StatCard label="Awaiting verify" value={pendingPayments} color={pendingPayments > 0 ? 'var(--warning)' : 'var(--text-secondary)'} />
         </div>
 
@@ -800,8 +813,11 @@ export default function AdminPage() {
         {/* ── PRODUCTS TAB ── */}
         {tab === 'products' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{products.length} product{products.length !== 1 ? 's' : ''} in inventory</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{filteredProducts.length === products.length ? products.length : `${filteredProducts.length} of ${products.length}`} product{products.length !== 1 ? 's' : ''} in inventory</p>
+                <label className="admin-product-search"><Search size={16} /><input type="search" value={productSearch} onChange={event => setProductSearch(event.target.value)} placeholder="Search products" aria-label="Search products" />{productSearch && <button type="button" onClick={() => setProductSearch('')} aria-label="Clear product search"><X size={15} /></button>}</label>
+              </div>
               <motion.button 
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.96 }}
@@ -848,15 +864,16 @@ export default function AdminPage() {
                   No products yet — click "Add product" to get started
                 </div>
               )}
+              {products.length > 0 && filteredProducts.length === 0 && <div className="admin-search-empty"><Search size={23} /><p>No products match “{productSearch.trim()}”</p><button onClick={() => setProductSearch('')}>Clear search</button></div>}
               <AnimatePresence>
-                {products.map((p, i) => (
+                {filteredProducts.map((p, i) => (
                   <motion.div 
                     key={p.id}
                     layout
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0, height: 0 }}
-                    style={{ padding: '12px 16px', borderBottom: i < products.length - 1 ? '1px solid var(--border)' : 'none' }}
+                    style={{ padding: '12px 16px', borderBottom: i < filteredProducts.length - 1 ? '1px solid var(--border)' : 'none' }}
                   >
                     {editingId === p.id ? (
                       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -972,7 +989,7 @@ export default function AdminPage() {
         )}
 
         {/* ── FINANCE TAB ── */}
-        {tab === 'finance' && <Ledger />}
+        {tab === 'finance' && <Ledger orders={orders} />}
       </div>
     </div>
   )

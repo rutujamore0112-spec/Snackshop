@@ -5,12 +5,15 @@ import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { motion } from 'framer-motion'
 import { auth, db } from '../lib/firebase'
+import ThemeToggle from '../components/ThemeToggle'
+import useThemePreference from '../lib/useThemePreference'
 
 const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 
 export default function CustomerAuth() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const { theme, toggleTheme } = useThemePreference()
 
   const handleGoogleSignIn = async () => {
     setLoading(true)
@@ -44,11 +47,13 @@ export default function CustomerAuth() {
 
   return (
     <div
+      className="auth-shell"
+      data-theme={theme}
       style={{
         minHeight: '100vh',
-        background: '#000000',
+        background: 'var(--bg)',
         backgroundImage:
-          'radial-gradient(circle at 50% 20%, #001524 0%, #000000 70%)',
+          'radial-gradient(circle at 50% 20%, var(--accent-dim) 0%, transparent 68%)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -56,6 +61,7 @@ export default function CustomerAuth() {
         fontFamily: "'Syne', sans-serif",
       }}
     >
+      <div style={{ position: 'fixed', top: 18, right: 18, zIndex: 5 }}><ThemeToggle theme={theme} onToggle={toggleTheme} /></div>
       <div style={{ width: '100%', maxWidth: 400, position: 'relative' }}>
 
         <motion.div
@@ -97,16 +103,16 @@ export default function CustomerAuth() {
               fontWeight: 800,
               fontSize: 34,
               letterSpacing: '-0.03em',
-              color: '#ffffff',
+              color: 'var(--text)',
               margin: 0,
             }}
           >
-            Snack<span style={{ color: '#87CEEB' }}>Shop</span>
+            Snack<span style={{ color: 'var(--accent)' }}>Shop</span>
           </h1>
 
           <p
             style={{
-              color: '#a1a1aa',
+              color: 'var(--text-secondary)',
               fontSize: 14,
               marginTop: 6,
               fontWeight: 500,
@@ -125,8 +131,8 @@ export default function CustomerAuth() {
             ease: [0.16, 1, 0.3, 1],
           }}
           style={{
-            background: '#0a0a0a',
-            border: '1px solid #141414',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
             borderRadius: 20,
             padding: 32,
             textAlign: 'center',
@@ -139,7 +145,7 @@ export default function CustomerAuth() {
               display: 'inline-block',
               background: 'rgba(135, 206, 235, 0.1)',
               border: '1px solid rgba(135, 206, 235, 0.25)',
-              color: '#87CEEB',
+              color: 'var(--accent)',
               padding: '6px 14px',
               borderRadius: 20,
               fontSize: 12,
@@ -155,7 +161,7 @@ export default function CustomerAuth() {
           <p
             style={{
               fontSize: 15,
-              color: '#d4d4d8',
+              color: 'var(--text-secondary)',
               marginBottom: 28,
               lineHeight: 1.5,
               fontWeight: 500,
@@ -176,8 +182,8 @@ export default function CustomerAuth() {
               width: '100%',
               padding: '14px 18px',
               borderRadius: 14,
-              background: loading ? '#141414' : '#87CEEB',
-              color: loading ? '#71717a' : '#000000',
+              background: loading ? 'var(--surface2)' : 'var(--accent)',
+              color: loading ? 'var(--text-hint)' : 'var(--accent-text)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
