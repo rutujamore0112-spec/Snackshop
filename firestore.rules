@@ -13,7 +13,8 @@ service cloud.firestore {
     //   required for new UPI drafts; cancelledBy is added when cancelled.
     // requests: userId/customerName/message/status/resolved/createdAt required;
     //   completedAt is added by an admin.
-    // ledger: spent/earned/self/note/createdAt required.
+    // ledger: supports both older spreadsheet-style records and the current
+    // typed transaction format used by the finance activity view.
     // settings: open required.
 
     // ===============================================================
@@ -137,20 +138,35 @@ service cloud.firestore {
     }
 
     function isValidLedgerEntry(data) {
-      return data.keys().hasAll(['spent', 'earned', 'self', 'note', 'createdAt'])
-        && data.keys().hasOnly(['spent', 'earned', 'self', 'note', 'createdAt'])
-        && data.spent is number
-        && data.spent >= 0
-        && data.spent <= 100000000
-        && data.earned is number
-        && data.earned >= 0
-        && data.earned <= 100000000
-        && data.self is number
-        && data.self >= 0
-        && data.self <= 100000000
-        && data.note is string
-        && data.note.size() <= 500
-        && data.createdAt is timestamp;
+      return (
+          data.keys().hasAll(['spent', 'earned', 'self', 'note', 'createdAt'])
+          && data.keys().hasOnly(['spent', 'earned', 'self', 'note', 'createdAt'])
+          && data.spent is number
+          && data.spent >= 0
+          && data.spent <= 100000000
+          && data.earned is number
+          && data.earned >= 0
+          && data.earned <= 100000000
+          && data.self is number
+          && data.self >= 0
+          && data.self <= 100000000
+          && data.note is string
+          && data.note.size() <= 500
+          && data.createdAt is timestamp
+        ) || (
+          data.keys().hasAll(['type', 'amount', 'note', 'transactionDate', 'createdAt'])
+          && data.keys().hasOnly(['type', 'amount', 'note', 'transactionDate', 'createdAt'])
+          && data.type in ['spent', 'earned', 'self', 'refund']
+          && data.amount is number
+          && data.amount > 0
+          && data.amount <= 100000000
+          && data.note is string
+          && data.note.size() > 0
+          && data.note.size() <= 500
+          && data.transactionDate is string
+          && data.transactionDate.size() == 10
+          && data.createdAt is timestamp
+        );
     }
 
     // ===============================================================
