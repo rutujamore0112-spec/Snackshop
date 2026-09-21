@@ -14,7 +14,7 @@ import MyOrders from '../components/MyOrders'
 import ThemeToggle from '../components/ThemeToggle'
 import useThemePreference from '../lib/useThemePreference'
 
-const CATEGORIES = ['all', 'chips', 'biscuits', 'sweets', 'namkeen', 'drinks']
+const CATEGORIES = ['all', 'chips', 'biscuits', 'sweets', 'namkeen', 'drinks', 'noodles']
 
 function Shop() {
   const { products, loading, error } = useProducts()

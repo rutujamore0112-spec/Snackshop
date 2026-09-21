@@ -16,7 +16,7 @@ import { isExpiredDraft } from '../lib/orderLifecycle.mjs'
 import ThemeToggle from '../components/ThemeToggle'
 import useThemePreference from '../lib/useThemePreference'
 
-const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen', 'drinks']
+const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen', 'drinks', 'noodles']
 
 const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 
