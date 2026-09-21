@@ -44,6 +44,7 @@ function Shop() {
       <header className="store-header">
         <div className="shop-header-inner">
           <a className="store-brand" href="/" aria-label="SnackShop home"><span className="brand-stamp">S</span>SnackShop</a>
+          <span className="header-note">Your campus corner shop.</span>
           <span className={`pickup-status shop-header-status ${shopOpen ? '' : 'closed'}`}>
             {shopOpen ? <Store size={12} /> : <DoorClosed size={12} />}
             {shopOpen ? 'Open for pickup' : 'Pickup paused'}
@@ -69,7 +70,12 @@ function Shop() {
         </nav>
         <motion.section className="store-hero" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
           <div><span className="eyebrow">YOUR CAMPUS CORNER SHOP</span><h1>Hey {displayName.split(' ')[0]},<br /><span>what's snacking?</span></h1><p>Live stock, quick ordering, and easy pickup for every craving.</p></div>
-          <div className="hero-badge" aria-hidden="true"><ShoppingBag size={42} /><strong>Small bag.<br />Big mood.</strong></div>
+          <div className="hero-badge" aria-hidden="true">
+            <span className="hero-badge-kicker">THE SNACK BREAK CLUB</span>
+            <ShoppingBag size={38} />
+            <strong>Small bag.<br />Big mood.</strong>
+            <span className="hero-badge-footer">ORDER · PAY · PICK UP</span>
+          </div>
         </motion.section>
 
         {!shopOpen && <div className="shop-notice"><DoorClosed size={16} /> You can still order. Pickup resumes when the shop reopens.</div>}
