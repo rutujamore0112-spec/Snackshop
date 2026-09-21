@@ -901,7 +901,7 @@ export default function AdminPage() {
                           <div style={{ fontSize: 11, color: 'var(--text-hint)', textTransform: 'capitalize' }}>{p.category}</div>
                         </div>
                         <div className="admin-product-price" style={{ fontFamily: 'Syne', fontWeight: 700, color: 'var(--accent)', minWidth: 50, textAlign: 'right' }}>₹{p.price}</div>
-                        <span className="admin-product-stock stock-availability-badge" style={{ padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, minWidth: 64, textAlign: 'center', color: p.stock === 0 ? 'var(--danger)' : p.stock <= 3 ? 'var(--warning)' : 'var(--success)' }}>
+                        <span className="admin-product-stock stock-availability-badge" style={{ padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, minWidth: 64, textAlign: 'center', color: p.stock === 0 ? 'var(--danger)' : p.stock <= 4 ? 'var(--warning)' : 'var(--success)' }}>
                           {p.stock} left
                         </span>
                         <div className="admin-product-actions" style={{ display: 'flex', gap: 6 }}>

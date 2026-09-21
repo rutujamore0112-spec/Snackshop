@@ -176,7 +176,7 @@ export default function ProductCard({ product }) {
 
         <div className="stock-area">
 
-          {available > 0 && available <= 5 ? (
+          {available > 0 && available <= 4 ? (
 
             <div
               className="stock-badge stock-availability-badge"
