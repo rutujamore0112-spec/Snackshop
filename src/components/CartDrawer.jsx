@@ -393,7 +393,7 @@ export default function CartDrawer({ products, open, onClose }) {
                 <p style={{ fontSize: 12, color: '#555', marginTop: 8, fontWeight: 600 }}>{OWNER_NAME}</p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 22 }}>
-                <code style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--surface2)', padding: '5px 12px', borderRadius: 8 }}>{UPI_ID}</code>
+                <code aria-label={`UPI ID ${UPI_ID}`} style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--surface2)', padding: '5px 12px', borderRadius: 8 }}>{UPI_ID}</code>
                 <button onClick={copyUPI} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 8px', color: 'var(--text-secondary)', display: 'flex' }}><Copy size={13} /></button>
               </div>
               <ol style={{ textAlign: 'left', paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 2.2 }}>
