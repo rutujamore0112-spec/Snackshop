@@ -62,7 +62,7 @@ export default function CustomerAuth() {
       }}
     >
       <div style={{ position: 'fixed', top: 18, right: 18, zIndex: 5 }}><ThemeToggle theme={theme} onToggle={toggleTheme} /></div>
-      <div style={{ width: '100%', maxWidth: 400, position: 'relative' }}>
+      <div className="auth-content" style={{ width: '100%', maxWidth: 400, position: 'relative' }}>
 
         <motion.div
           animate={{
@@ -123,6 +123,7 @@ export default function CustomerAuth() {
         </motion.div>
 
         <motion.div
+          className="auth-card"
           initial={{ opacity: 0, y: 30, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{

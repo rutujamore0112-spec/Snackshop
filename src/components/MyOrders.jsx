@@ -52,7 +52,7 @@ function OrderCard({ order }) {
   }
 
   return (
-    <div style={{
+    <div className="customer-order-card" style={{
       background: 'var(--surface2)',
       border: `1px solid ${order.status === 'paid' ? 'rgba(46,204,113,0.2)' : order.status === 'cancelled' ? 'rgba(255,92,92,0.2)' : 'var(--border)'}`,
       borderRadius: 10,
@@ -77,7 +77,7 @@ function OrderCard({ order }) {
         <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 14 }}>₹{order.total}</span>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+      <div className="customer-order-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
         <span style={{ fontSize: 11, color: cfg.color, fontStyle: 'italic' }}>{cfg.hint}</span>
         {canCancel && (
           <button

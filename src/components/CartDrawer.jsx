@@ -240,7 +240,7 @@ export default function CartDrawer({ products, open, onClose }) {
   return (
     <>
       <div onClick={handleClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 40, backdropFilter: 'blur(3px)' }} />
-      <div style={{ position: 'fixed', right: 0, top: 0, bottom: 0, width: '100%', maxWidth: 420, background: 'var(--surface)', borderLeft: '1px solid var(--border)', zIndex: 50, display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'slideIn 0.22s ease' }}>
+      <div className="cart-drawer" style={{ position: 'fixed', right: 0, top: 0, bottom: 0, width: '100%', maxWidth: 420, background: 'var(--surface)', borderLeft: '1px solid var(--border)', zIndex: 50, display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'slideIn 0.22s ease' }}>
         <style>{`
           @keyframes slideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }
           @keyframes popIn { from { transform: scale(0.88); opacity: 0 } to { transform: scale(1); opacity: 1 } }
@@ -248,7 +248,7 @@ export default function CartDrawer({ products, open, onClose }) {
         `}</style>
 
         {/* Header */}
-        <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div className="cart-drawer-header" style={{ padding: '18px 20px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <h2 style={{ fontFamily: 'Syne', fontSize: 19, fontWeight: 700 }}>
             {step === 'cart' && 'Your Cart'}
             {step === 'method' && 'Choose Payment'}
@@ -275,7 +275,7 @@ export default function CartDrawer({ products, open, onClose }) {
         )}
 
         {/* Content */}
-        <div className="custom-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', WebkitOverflowScrolling: 'touch' }}>
+        <div className="custom-scrollbar cart-drawer-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', WebkitOverflowScrolling: 'touch' }}>
 
           {/* CART */}
           {step === 'cart' && (
@@ -292,12 +292,12 @@ export default function CartDrawer({ products, open, onClose }) {
                     Ordering as <strong style={{ color: 'var(--text)' }}>{customerName}</strong>
                   </div>
                   {cartProducts.map(p => (
-                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: '1px solid var(--border)' }}>
+                    <div className="cart-product-row" key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: '1px solid var(--border)' }}>
                       <div>
                         <div style={{ fontWeight: 500, fontSize: 14 }}>{p.name}</div>
                         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>₹{p.price} × {items[p.id]}</div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div className="cart-product-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 15 }}>₹{p.price * items[p.id]}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--surface2)', borderRadius: 8 }}>
                           <button onClick={() => decrementFromCart(p.id)} style={{ background: 'none', border: 'none', padding: '6px 9px', color: 'var(--text)', fontWeight: 700, cursor: 'pointer', display: 'flex' }}>−</button>
@@ -344,7 +344,7 @@ export default function CartDrawer({ products, open, onClose }) {
                 <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 16 }}>₹{total}</span>
               </div>
               <div style={{ background: 'white', borderRadius: 20, padding: '16px 16px 10px', display: 'inline-block', marginBottom: 16 }}>
-                <img src="/qr.jpeg" alt="UPI QR" style={{ width: 230, height: 230, display: 'block', objectFit: 'contain', borderRadius: 10 }} />
+                <img className="checkout-qr" src="/qr.jpeg" alt="UPI QR" style={{ width: 230, height: 230, display: 'block', objectFit: 'contain', borderRadius: 10 }} />
                 <p style={{ fontSize: 12, color: '#555', marginTop: 8, fontWeight: 600 }}>{OWNER_NAME}</p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 22 }}>
@@ -393,7 +393,7 @@ export default function CartDrawer({ products, open, onClose }) {
 
         {/* Footers */}
         {step === 'cart' && cartProducts.length > 0 && (
-          <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+          <div className="cart-drawer-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Total</span>
               <span style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 22 }}>₹{total}</span>
@@ -405,7 +405,7 @@ export default function CartDrawer({ products, open, onClose }) {
         )}
 
         {step === 'qr' && (
-          <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+          <div className="cart-drawer-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
             <button onClick={handleConfirmPaid} disabled={submitting || cancelling} style={{ width: '100%', padding: 13, borderRadius: 12, background: 'var(--success-dim)', color: 'var(--success)', border: '1px solid rgba(46,204,113,0.3)', fontFamily: 'Syne', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <CheckCircle size={16} /> I've paid
             </button>

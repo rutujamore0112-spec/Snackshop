@@ -67,6 +67,8 @@ export default function ProductCard({ product }) {
             src={product.imageUrl || product.image}
             alt={product.name}
             className="product-image"
+            loading="lazy"
+            decoding="async"
             onError={e => {
               e.target.style.display = 'none'
             }}

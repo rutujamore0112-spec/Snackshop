@@ -35,7 +35,7 @@ function RequestCard({ r }) {
   const isFulfilled = status === 'completed'
 
   return (
-    <div style={{
+    <div className="customer-request-card" style={{
       background: isFulfilled ? 'rgba(46,204,113,0.08)' : 'var(--surface2)',
       border: `1px solid ${status === 'in_progress' ? 'rgba(245,200,66,0.25)' : isFulfilled ? 'rgba(46,204,113,0.4)' : 'var(--border)'}`,
       boxShadow: isFulfilled ? '0 0 0 1px rgba(46,204,113,0.15)' : 'none',
@@ -43,11 +43,11 @@ function RequestCard({ r }) {
       padding: '12px 14px',
       transition: 'border-color 0.3s',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+      <div className="customer-request-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1, lineHeight: 1.4, margin: 0 }}>{r.message}</p>
         <StatusBadge status={status} />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+      <div className="customer-request-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
         <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>
           {r.createdAt?.toDate?.()?.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) || '—'}
         </span>
@@ -144,7 +144,7 @@ export default function RequestForm() {
   return (
     <div style={{ marginTop: 36 }}>
       {/* Section header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <div className="request-section-heading" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <MessageSquare size={15} color="var(--text-secondary)" />
         <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 15 }}>Request a snack</span>
         <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>Can't find something? Let us know</span>

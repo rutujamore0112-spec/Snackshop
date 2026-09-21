@@ -719,12 +719,12 @@ export default function AdminPage() {
         }
       `}</style>
       <header className="admin-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 30 }}>
-        <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px', height: 58, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="admin-header-inner" style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px', height: 58, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="admin-brand" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 18 }}>SnackShop</span>
             <span style={{ fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '2px 8px', borderRadius: 100, fontWeight: 600 }}>ADMIN</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="admin-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <motion.button
               whileHover={{ scale: 1.02 }}
@@ -742,7 +742,7 @@ export default function AdminPage() {
               title="Toggle whether the shop shows as open for pickup"
             >
               {shopOpen ? <Store size={13} /> : <DoorClosed size={13} />}
-              {shopOpen ? 'Shop Open' : 'Shop Closed'}
+              <span className="admin-shop-label">{shopOpen ? 'Shop Open' : 'Shop Closed'}</span>
             </motion.button>
             <motion.button 
               whileHover={{ scale: 1.02 }}
@@ -750,15 +750,15 @@ export default function AdminPage() {
               onClick={handleLogout} 
               style={{ background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.2)', borderRadius: 8, padding: '6px 12px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}
             >
-              <LogOut size={13} /> Logout
+              <LogOut size={13} /> <span className="admin-logout-label">Logout</span>
             </motion.button>
           </div>
         </div>
       </header>
 
-      <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
+      <div className="admin-main" style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
         {/* Stats Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 28 }}>
+        <div className="admin-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 28 }}>
           <StatCard label="Total products" value={products.length} />
           <StatCard label="Paid orders" value={orders.filter(o => o.status === 'paid').length} color="var(--success)" />
           <StatCard label="Revenue" value={`₹${totalRevenue}`} color="var(--accent)" maskable />
@@ -766,7 +766,7 @@ export default function AdminPage() {
         </div>
 
         {/* Dynamic Animated Tabs */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div className="admin-tabs" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           {tabs.map(t => (
             <button 
               key={t.id} 
@@ -892,19 +892,19 @@ export default function AdminPage() {
                         </div>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div className="admin-product-row" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style={{ width: 52, height: 52, borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {p.imageUrl ? <img src={p.imageUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} /> : <NoImagePlaceholder small />}
+                          {p.imageUrl ? <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} /> : <NoImagePlaceholder small />}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
                           <div style={{ fontSize: 11, color: 'var(--text-hint)', textTransform: 'capitalize' }}>{p.category}</div>
                         </div>
-                        <div style={{ fontFamily: 'Syne', fontWeight: 700, color: 'var(--accent)', minWidth: 50, textAlign: 'right' }}>₹{p.price}</div>
-                        <span style={{ padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, minWidth: 64, textAlign: 'center', background: p.stock === 0 ? 'var(--danger-dim)' : p.stock <= 3 ? 'var(--warning-dim)' : 'var(--success-dim)', color: p.stock === 0 ? 'var(--danger)' : p.stock <= 3 ? 'var(--warning)' : 'var(--success)' }}>
+                        <div className="admin-product-price" style={{ fontFamily: 'Syne', fontWeight: 700, color: 'var(--accent)', minWidth: 50, textAlign: 'right' }}>₹{p.price}</div>
+                        <span className="admin-product-stock" style={{ padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, minWidth: 64, textAlign: 'center', background: p.stock === 0 ? 'var(--danger-dim)' : p.stock <= 3 ? 'var(--warning-dim)' : 'var(--success-dim)', color: p.stock === 0 ? 'var(--danger)' : p.stock <= 3 ? 'var(--warning)' : 'var(--success)' }}>
                           {p.stock} left
                         </span>
-                        <div style={{ display: 'flex', gap: 6 }}>
+                        <div className="admin-product-actions" style={{ display: 'flex', gap: 6 }}>
                           <button onClick={() => restockProduct(p.id)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>Restock</button>
                           <button onClick={() => { setEditingId(p.id); setEditData({ ...p }) }} style={{ background: 'var(--surface2)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}><Edit2 size={13} /></button>
                           <button onClick={() => deleteProduct(p.id)} style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--danger)', display: 'flex', cursor: 'pointer' }}><Trash2 size={13} /></button>
