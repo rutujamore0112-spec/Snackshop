@@ -310,6 +310,14 @@ textarea::placeholder {
   padding: 4px 8px;
 }
 
+/* Shared visual treatment for stock and availability labels everywhere. */
+.stock-availability-badge {
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
 .product-actions {
   gap: 8px;
   padding-top: 8px;

@@ -179,18 +179,12 @@ export default function ProductCard({ product }) {
           {available > 0 && available <= 5 ? (
 
             <div
-              className="stock-badge"
+              className="stock-badge stock-availability-badge"
               style={{
                 color:
                   available <= 1
                     ? '#ef4444'
                     : '#f59e0b',
-
-                background:
-                  available <= 1
-                    ? '#2c1212'
-                    : '#261c0c',
-
                 borderRadius: 6,
                 display: 'inline-block',
                 fontWeight: 600,
