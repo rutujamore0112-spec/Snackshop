@@ -44,7 +44,7 @@ function Shop() {
       <header className="store-header">
         <div className="shop-header-inner">
           <a className="store-brand" href="/" aria-label="SnackShop home"><span className="brand-stamp">S</span>SnackShop</a>
-          <span className={`pickup-status hide-on-mobile ${shopOpen ? '' : 'closed'}`}>
+          <span className={`pickup-status shop-header-status ${shopOpen ? '' : 'closed'}`}>
             {shopOpen ? <Store size={12} /> : <DoorClosed size={12} />}
             {shopOpen ? 'Open for pickup' : 'Pickup paused'}
           </span>
@@ -59,7 +59,14 @@ function Shop() {
       </header>
 
       <main className="shop-main">
-        <nav className="customer-history-nav" aria-label="Your activity"><a href="#my-orders">My orders</a><a href="#my-requests">My requests</a></nav>
+        <nav className="customer-history-nav" aria-label="Your activity">
+          <a href="#my-orders">My orders</a>
+          <span className={`pickup-status mobile-pickup-status ${shopOpen ? '' : 'closed'}`} role="status">
+            {shopOpen ? <Store size={12} /> : <DoorClosed size={12} />}
+            {shopOpen ? 'Open for pickup' : 'Pickup paused'}
+          </span>
+          <a href="#my-requests">My requests</a>
+        </nav>
         <motion.section className="store-hero" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
           <div><span className="eyebrow">YOUR CAMPUS CORNER SHOP</span><h1>Hey {displayName.split(' ')[0]},<br /><span>what's snacking?</span></h1><p>Live stock, quick ordering, and easy pickup for every craving.</p></div>
           <div className="hero-badge" aria-hidden="true"><ShoppingBag size={42} /><strong>Small bag.<br />Big mood.</strong></div>

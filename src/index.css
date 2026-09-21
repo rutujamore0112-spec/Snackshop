@@ -698,6 +698,7 @@ textarea::placeholder {
 .customer-history-nav { display: flex; justify-content: flex-end; gap: 22px; margin-bottom: 18px; font-size: 13px; }
 .customer-history-nav a { color: var(--text-secondary); text-decoration: none; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
 .customer-history-nav a:hover { color: var(--accent); border-color: var(--accent); }
+.mobile-pickup-status { display: none; }
 
 .store-hero {
   min-height: 265px;
@@ -800,7 +801,9 @@ textarea::placeholder {
   .catalog-toolbar { gap: 10px; }
   .catalog-toolbar .shop-categories { gap: 19px; }
   .product-result-count { display: none; }
-  .customer-history-nav { justify-content: space-between; }
+  .shop-header-status { display: none; }
+  .customer-history-nav { align-items: center; justify-content: space-between; gap: 8px; }
+  .mobile-pickup-status { min-height: 38px; padding: 5px 9px; display: inline-flex; justify-content: center; text-align: center; line-height: 1.15; }
   .store-footer { align-items: flex-start; flex-direction: column; }
   .finance-overview-heading, .finance-section-heading { align-items: stretch; flex-direction: column; }
   .finance-add-button, .finance-search { width: 100%; justify-content: center; }
