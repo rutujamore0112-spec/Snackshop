@@ -1,5 +1,6 @@
-import { useCart } from '../lib/CartContext'
+import { Minus, Plus, ShoppingBag } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useCart } from '../lib/CartContext'
 
 export default function ProductCard({ product }) {
   const { items, addToCart, decrementFromCart } = useCart()
@@ -7,317 +8,79 @@ export default function ProductCard({ product }) {
   if (!product) return null
 
   const inCart = items[product.id] || 0
-
-  const available =
-    (product.visibleStock ?? product.stock ?? 0) -
-    inCart
-
-  const outOfStock = available <= 0
+  const stock = Number(product.visibleStock ?? product.stock ?? 0)
+  const available = Math.max(0, stock - inCart)
+  const soldOut = stock <= 0 && inCart === 0
+  const cannotAddMore = available <= 0
 
   const handleAdd = () => {
+    if (cannotAddMore) {
+      toast.error("That's all we have in stock at the moment")
+      return
+    }
     addToCart(product, 1)
     toast.success(`Added ${product.name}`)
   }
 
-  const handleIncrement = () => {
-    if (available <= 0) {
-      toast.error(
-        "That's all we have in stock at the moment"
-      )
-      return
-    }
-    addToCart(product, 1)
-  }
+  const stockMessage = soldOut
+    ? 'Currently out of stock'
+    : available === 0
+      ? 'All available stock is in your bag'
+      : available === 1
+        ? 'Last 1 available!'
+        : available <= 4
+          ? `Only ${available} left!`
+          : 'Ready for pickup'
 
-  const handleDecrement = () => {
-    decrementFromCart(product.id)
-  }
+  const lowStock = available > 0 && available <= 4
 
   return (
-    <div
-      className="product-card"
-      style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        opacity: outOfStock && inCart === 0 ? 0.6 : 1,
-      }}
-    >
-
-      {/* ================= PRODUCT IMAGE ================= */}
-
-      <div
-        className="product-image-container"
-        style={{
-          width: '100%',
-          background: product.bg || 'var(--surface2)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-        }}
-      >
-
+    <article className={`product-card${soldOut ? ' is-sold-out' : ''}`}>
+      <div className="product-image-container" style={product.bg ? { '--product-image-bg': product.bg } : undefined}>
+        {soldOut && <span className="sold-out-label">Back soon</span>}
         {product.imageUrl || product.image ? (
-
           <img
             src={product.imageUrl || product.image}
             alt={product.name}
             className="product-image"
             loading="lazy"
             decoding="async"
-            onError={e => {
-              e.target.style.display = 'none'
-            }}
+            onError={event => { event.currentTarget.style.display = 'none' }}
           />
-
         ) : (
-
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: 'var(--text-hint)',
-              transform: 'rotate(-35deg)',
-              letterSpacing: '0.08em',
-            }}
-          >
-            NO IMAGE
-          </span>
-
-        )}
-
-        {/* ================= OUT OF STOCK ================= */}
-
-        {outOfStock && inCart === 0 && (
-
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'rgba(0,0,0,0.65)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 8,
-            }}
-          >
-
-            <span
-              className="out-of-stock-text"
-              style={{
-                color: 'white',
-                fontWeight: 700,
-                letterSpacing: '0.05em',
-                textAlign: 'center',
-              }}
-            >
-              OUT OF STOCK
-            </span>
-
+          <div className="product-image-fallback" aria-label="Product image unavailable">
+            <ShoppingBag size={30} />
+            <span>Image coming soon</span>
           </div>
-
         )}
-
       </div>
 
-      {/* ================= CARD CONTENT ================= */}
-
-      <div
-        className="product-card-content"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          flexGrow: 1,
-          minWidth: 0,
-        }}
-      >
-
-        {/* Product name */}
-
-        <div
-          className="product-name-container"
-        >
-          <h3
-            className="product-name"
-            style={{
-              fontFamily: 'Syne',
-              fontWeight: 700,
-              color: 'var(--text)',
-              margin: 0,
-              lineHeight: 1.3,
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }}
-          >
-            {product.name}
-          </h3>
+      <div className="product-card-content">
+        <span className="product-category">{product.category || 'Snacks'}</span>
+        <div className="product-name-container">
+          <h3 className="product-name">{product.name}</h3>
         </div>
 
-        {/* Price */}
-
-        <div
-          className="product-price"
-          style={{
-            fontFamily: 'Syne',
-            fontWeight: 800,
-            color: 'var(--accent)',
-          }}
-        >
-          ₹{product.price}
+        <div className={`product-stock-message${lowStock ? ' stock-availability-badge is-low' : ''}${soldOut ? ' is-sold-out-message' : ''}`}>
+          {lowStock && <span aria-hidden="true">⚡</span>}
+          {stockMessage}
         </div>
 
-        {/* ================= STOCK BADGE ================= */}
-
-        <div className="stock-area">
-
-          {available > 0 && available <= 4 ? (
-
-            <div
-              className="stock-badge stock-availability-badge"
-              style={{
-                color:
-                  available <= 1
-                    ? '#ef4444'
-                    : '#f59e0b',
-                borderRadius: 6,
-                display: 'inline-block',
-                fontWeight: 600,
-              }}
-            >
-              ⚡{' '}
-
-              {available === 1
-                ? 'Last 1 available!'
-                : `Only ${available} left!`}
-            </div>
-
-          ) : !outOfStock ? (
-
-            <div
-              style={{
-                height: 4,
-                width: '100%',
-                background: '#2ecc71',
-                borderRadius: 2,
-                marginTop: 10,
-              }}
-            />
-
-          ) : null}
-
-        </div>
-
-        {/* ================= BOTTOM ACTIONS ================= */}
-
-        <div
-          className="product-actions"
-          style={{
-            marginTop: 'auto',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-
-          {inCart === 0 ? (
-
-            // No items in cart yet: single centered Add button
-            !outOfStock && (
-              <button
-                onClick={handleAdd}
-                className="product-add-button"
-                style={{
-                  width: '100%',
-                  background: 'var(--accent)',
-                  color: 'var(--accent-text)',
-                  border: 'none',
-                  borderRadius: 8,
-                  fontFamily: 'Syne',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  padding: '10px 0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                Add
-              </button>
-            )
-
+        <div className="product-actions">
+          <span className="product-price">₹{product.price}</span>
+          {soldOut ? (
+            <button type="button" className="product-sold-out-button" disabled>Sold out</button>
+          ) : inCart === 0 ? (
+            <button type="button" onClick={handleAdd} className="product-add-button">Add</button>
           ) : (
-
-            // Already in cart: stepper replaces the Add button, driving cart qty directly
-            <div
-              className="quantity-selector"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: 'var(--accent)',
-                borderRadius: 8,
-                width: '100%',
-                padding: '4px 0',
-              }}
-            >
-
-              <button
-                onClick={handleDecrement}
-                className="quantity-button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--accent-text)',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  flex: 1,
-                }}
-                aria-label="Decrease quantity"
-              >
-                −
-              </button>
-
-              <span
-                className="quantity-number"
-                style={{
-                  fontWeight: 700,
-                  color: 'var(--accent-text)',
-                  textAlign: 'center',
-                  flex: 1,
-                }}
-              >
-                {inCart}
-              </span>
-
-              <button
-                onClick={handleIncrement}
-                className="quantity-button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--accent-text)',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  flex: 1,
-                }}
-                aria-label="Increase quantity"
-              >
-                +
-              </button>
-
+            <div className="quantity-selector" aria-label={`${product.name} quantity`}>
+              <button type="button" onClick={() => decrementFromCart(product.id)} className="quantity-button" aria-label="Decrease quantity"><Minus size={15} /></button>
+              <span className="quantity-number">{inCart}</span>
+              <button type="button" onClick={handleAdd} className="quantity-button" aria-label="Increase quantity" disabled={cannotAddMore}><Plus size={15} /></button>
             </div>
-
           )}
-
         </div>
-
       </div>
-    </div>
+    </article>
   )
 }

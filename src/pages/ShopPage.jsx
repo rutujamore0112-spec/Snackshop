@@ -33,17 +33,19 @@ function Shop() {
   ), [])
 
   const normalizedQuery = query.trim().toLowerCase()
-  const filtered = products.filter(product =>
-    (tab === 'all' || product.category === tab) &&
-    (product.name || '').toLowerCase().includes(normalizedQuery)
-  )
+  const filtered = products
+    .filter(product =>
+      (tab === 'all' || product.category === tab) &&
+      (product.name || '').toLowerCase().includes(normalizedQuery)
+    )
+    .sort((a, b) => Number((a.visibleStock ?? a.stock ?? 0) <= 0) - Number((b.visibleStock ?? b.stock ?? 0) <= 0))
   const displayName = profile?.name || user?.displayName || user?.email?.split('@')[0] || 'Customer'
 
   return (
     <div className="shop-shell" data-theme={theme}>
       <header className="store-header">
         <div className="shop-header-inner">
-          <a className="store-brand" href="/" aria-label="SnackShop home"><span className="brand-stamp">S</span>SnackShop</a>
+          <a className="store-brand" href="/" aria-label="SnackShop home"><span className="brand-stamp">S.</span>SnackShop<span className="brand-dot">.</span></a>
           <span className="header-note">Your campus corner shop.</span>
           <span className={`pickup-status shop-header-status ${shopOpen ? '' : 'closed'}`}>
             {shopOpen ? <Store size={12} /> : <DoorClosed size={12} />}
@@ -93,7 +95,7 @@ function Shop() {
           </div>
           {error && <div className="shop-notice">We couldn't load the shelves. Refresh to try again.</div>}
           {loading ? (
-            <div className="products-grid">{Array.from({ length: 10 }, (_, index) => <div className="product-skeleton" key={index} />)}</div>
+            <div className="products-grid">{Array.from({ length: 8 }, (_, index) => <div className="product-skeleton" key={index} />)}</div>
           ) : filtered.length === 0 ? (
             <div className="catalog-empty"><Search size={24} /><h3>No snacks found</h3><p>Try another name or category.</p><button onClick={() => { setQuery(''); setTab('all') }}>Show everything</button></div>
           ) : (
