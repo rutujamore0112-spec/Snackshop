@@ -5,8 +5,8 @@ import ThemeToggle from './ThemeToggle'
 
 const SECTIONS = [
   { id: 'new-request', label: 'New request', hint: "Can't find something? Let us know", Icon: Send },
-  { id: 'orders', label: 'Old orders', hint: 'Your previous SnackShop orders', Icon: Package },
-  { id: 'requests', label: 'Old requests', hint: 'Progress and stocked updates', Icon: Bell },
+  { id: 'orders', label: 'Old orders', hint: 'Orders from the last 24 hours', Icon: Package },
+  { id: 'requests', label: 'Old requests', hint: 'Requests from the last 72 hours', Icon: Bell },
 ]
 
 export default function ProfileMenu({

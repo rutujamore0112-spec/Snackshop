@@ -6,8 +6,7 @@ import { db } from '../lib/firebase'
 import { updateOrderStatus } from '../lib/orders'
 import { ACTIVE_ORDER_STATUSES, isExpiredDraft } from '../lib/orderLifecycle.mjs'
 import { useAuth } from '../lib/AuthContext'
-
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
+import { customerVisibleOrders } from '../lib/customerHistory.mjs'
 
 // ── Status config — mirrors AdminPage.jsx order statuses ────────
 const ORDER_STATUSES = {
@@ -101,6 +100,7 @@ export default function MyOrders({ embedded = false, watchOnly = false }) {
   const { user } = useAuth()
   const [orders, setOrders] = useState([])
   const [open, setOpen] = useState(true)
+  const [historyNow, setHistoryNow] = useState(() => Date.now())
 
   useEffect(() => {
     if (!user?.uid) return
@@ -126,19 +126,18 @@ export default function MyOrders({ embedded = false, watchOnly = false }) {
     return () => clearInterval(timer)
   }, [orders, watchOnly])
 
+  useEffect(() => {
+    if (watchOnly) return undefined
+    const timer = setInterval(() => setHistoryNow(Date.now()), 60 * 1000)
+    return () => clearInterval(timer)
+  }, [watchOnly])
+
   if (watchOnly) return null
 
   // Only show orders placed in the last 24 hours — this is purely a
   // display filter on the customer's own view. The order document itself
   // is never deleted, so admin's dashboard still sees everything forever.
-  const recentOrders = orders.filter(o => {
-    const created = o.createdAt?.toDate?.()
-    if (ACTIVE_ORDER_STATUSES.includes(o.status)) return true
-    if (!created) return true // still resolving serverTimestamp, show it for now
-    return Date.now() - created.getTime() < TWENTY_FOUR_HOURS_MS
-  })
-
-  const visibleOrders = embedded ? orders : recentOrders
+  const visibleOrders = customerVisibleOrders(orders, historyNow)
 
   if (!embedded && visibleOrders.length === 0) return null
 
@@ -146,7 +145,7 @@ export default function MyOrders({ embedded = false, watchOnly = false }) {
 
   if (embedded) return (
     <div className="profile-history-list">
-      {visibleOrders.length === 0 && <p className="profile-history-empty">You have not placed any orders yet.</p>}
+      {visibleOrders.length === 0 && <p className="profile-history-empty">No orders from the last 24 hours.</p>}
       {visibleOrders.map(order => <OrderCard key={order.id} order={order} />)}
     </div>
   )

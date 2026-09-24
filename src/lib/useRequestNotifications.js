@@ -6,11 +6,13 @@ import { requestStatus, unreadRequestUpdates } from './requestNotifications.mjs'
 export default function useRequestNotifications(uid) {
   const [unreadCount, setUnreadCount] = useState(0)
   const unreadRef = useRef([])
+  const requestsRef = useRef([])
   const markingRef = useRef(false)
 
   useEffect(() => {
     if (!uid) {
       unreadRef.current = []
+      requestsRef.current = []
       setUnreadCount(0)
       return undefined
     }
@@ -21,12 +23,23 @@ export default function useRequestNotifications(uid) {
       orderBy('createdAt', 'desc'),
     )
 
-    return onSnapshot(requestsQuery, snapshot => {
-      const requests = snapshot.docs.map(item => ({ id: item.id, ...item.data() }))
-      const unread = unreadRequestUpdates(requests)
+    const updateUnread = () => {
+      const unread = unreadRequestUpdates(requestsRef.current)
       unreadRef.current = unread
       setUnreadCount(unread.length)
+    }
+
+    const unsubscribe = onSnapshot(requestsQuery, snapshot => {
+      const requests = snapshot.docs.map(item => ({ id: item.id, ...item.data() }))
+      requestsRef.current = requests
+      updateUnread()
     }, error => console.error('Request notification listener:', error))
+
+    const timer = setInterval(updateUnread, 60 * 1000)
+    return () => {
+      clearInterval(timer)
+      unsubscribe()
+    }
   }, [uid])
 
   const markRequestUpdatesRead = useCallback(async () => {

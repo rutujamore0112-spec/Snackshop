@@ -21,3 +21,12 @@ test('legacy resolved requests map to completed and can surface once', () => {
   assert.equal(requestStatus(requests[0]), 'completed')
   assert.deepEqual(unreadRequestUpdates(requests).map(request => request.id), ['one'])
 })
+
+test('request updates older than 72 hours do not notify customers', () => {
+  const now = Date.UTC(2026, 8, 24, 12)
+  const requests = [
+    { id: 'recent', status: 'completed', customerSeenStatus: 'pending', createdAt: now - (71 * 60 * 60 * 1000) },
+    { id: 'expired', status: 'completed', customerSeenStatus: 'pending', createdAt: now - (72 * 60 * 60 * 1000) },
+  ]
+  assert.deepEqual(unreadRequestUpdates(requests, now).map(request => request.id), ['recent'])
+})

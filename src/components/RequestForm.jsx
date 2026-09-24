@@ -5,6 +5,7 @@ import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp, where 
 import { db } from '../lib/firebase'
 import { useAuth } from '../lib/AuthContext'
 import { hasUnreadRequestUpdate, requestStatus } from '../lib/requestNotifications.mjs'
+import { customerVisibleRequests } from '../lib/customerHistory.mjs'
 
 const REQUEST_STATUSES = {
   pending: { label: 'Pending', Icon: Clock, hint: 'We received your request and will review it soon.' },
@@ -39,6 +40,7 @@ export default function RequestForm({ historyOnly = false, showHistory = true, e
   const [sending, setSending] = useState(false)
   const [requests, setRequests] = useState([])
   const [historyError, setHistoryError] = useState('')
+  const [historyNow, setHistoryNow] = useState(() => Date.now())
 
   useEffect(() => {
     if (initialMessage) setMessage(initialMessage)
@@ -59,6 +61,12 @@ export default function RequestForm({ historyOnly = false, showHistory = true, e
       setHistoryError('Could not load your requests. Please refresh and try again.')
     })
   }, [historyOnly, showHistory, user?.uid])
+
+  useEffect(() => {
+    if (!historyOnly && !showHistory) return undefined
+    const timer = setInterval(() => setHistoryNow(Date.now()), 60 * 1000)
+    return () => clearInterval(timer)
+  }, [historyOnly, showHistory])
 
   const handleSend = async () => {
     const cleanMessage = message.trim()
@@ -87,12 +95,14 @@ export default function RequestForm({ historyOnly = false, showHistory = true, e
     }
   }
 
+  const visibleRequests = customerVisibleRequests(requests, historyNow)
+
   if (historyOnly) {
     return (
       <div className="profile-history-list">
         {historyError && <p role="alert" className="profile-history-empty">{historyError}</p>}
-        {!historyError && requests.length === 0 && <p className="profile-history-empty">You have not sent any requests yet.</p>}
-        {requests.map(request => <RequestCard key={request.id} request={request} />)}
+        {!historyError && visibleRequests.length === 0 && <p className="profile-history-empty">No requests from the last 72 hours.</p>}
+        {visibleRequests.map(request => <RequestCard key={request.id} request={request} />)}
       </div>
     )
   }
@@ -116,7 +126,7 @@ export default function RequestForm({ historyOnly = false, showHistory = true, e
           <button type="button" onClick={handleSend} disabled={sending || !message.trim()}><Send size={14} />{sending ? 'Sending' : 'Send request'}</button>
         </div>
       </div>
-      {showHistory && <div className="profile-history-list standalone-history">{requests.map(request => <RequestCard key={request.id} request={request} />)}</div>}
+      {showHistory && <div className="profile-history-list standalone-history">{visibleRequests.map(request => <RequestCard key={request.id} request={request} />)}</div>}
     </div>
   )
 }

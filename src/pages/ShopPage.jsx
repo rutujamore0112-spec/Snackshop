@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Search, ShoppingBag, Store, DoorClosed } from 'lucide-react'
+import { ArrowUpRight, Search, ShoppingBag, Sparkles, Store, DoorClosed } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { signOut } from 'firebase/auth'
 import { doc, onSnapshot } from 'firebase/firestore'
@@ -60,10 +60,6 @@ function Shop() {
         <div className="shop-header-inner">
           <a className="store-brand" href="/" aria-label="SnackShop home"><span className="brand-stamp">S.</span>SnackShop<span className="brand-dot">.</span></a>
           <span className="header-note">Your campus corner shop.</span>
-          <span className={`pickup-status shop-header-status ${shopOpen ? '' : 'closed'}`}>
-            {shopOpen ? <Store size={12} /> : <DoorClosed size={12} />}
-            {shopOpen ? 'Open for pickup' : 'Pickup paused'}
-          </span>
           <div className="shop-header-actions">
             <HeaderSearch query={query} onQueryChange={setQuery} resultCount={filtered.length} onShowResults={showSearchResults} onRequestProduct={requestSearchedProduct} />
             <ProfileMenu
@@ -90,12 +86,22 @@ function Shop() {
           {shopOpen ? 'Open for pickup' : 'Pickup paused'}
         </span>
         <motion.section className="store-hero" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-          <div><span className="eyebrow">YOUR CAMPUS CORNER SHOP</span><h1>Hey {displayName.split(' ')[0]},<br /><span>what's snacking?</span></h1><p>Live stock, quick ordering, and easy pickup for every craving.</p></div>
+          <div className="hero-copy">
+            <div className="hero-welcome">
+              <span>Good to see you, {displayName.split(' ')[0]}.</span>
+              <span className={`pickup-status desktop-pickup-status ${shopOpen ? '' : 'closed'}`}>
+                {shopOpen ? <Store size={12} /> : <DoorClosed size={12} />}
+                {shopOpen ? 'Pickup available' : 'Pickup paused'}
+              </span>
+            </div>
+            <h1>The good stuff.<br /><span>On your time.</span></h1>
+            <p>A little salty. A little sweet. Your everyday favourites,<br />for study breaks and midnight munchies.</p>
+          </div>
           <div className="hero-badge" aria-hidden="true">
             <span className="hero-badge-kicker">THE SNACK BREAK CLUB</span>
-            <ShoppingBag size={38} />
+            <span className="hero-badge-icons"><ShoppingBag size={42} /><Sparkles size={30} /></span>
             <strong>Small bag.<br />Big mood.</strong>
-            <span className="hero-badge-footer">ORDER · PAY · PICK UP</span>
+            <span className="hero-badge-footer"><span>ORDER. PAY. PICK UP.</span><ArrowUpRight size={17} /></span>
           </div>
         </motion.section>
 
