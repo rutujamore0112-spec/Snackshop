@@ -11,9 +11,9 @@ import ProductCard from '../components/ProductCard'
 import CartDrawer from '../components/CartDrawer'
 import RequestForm from '../components/RequestForm'
 import MyOrders from '../components/MyOrders'
-import ThemeToggle from '../components/ThemeToggle'
 import HeaderSearch from '../components/HeaderSearch'
 import ProfileMenu from '../components/ProfileMenu'
+import FloatingCartBar from '../components/FloatingCartBar'
 import useThemePreference from '../lib/useThemePreference'
 import useRequestNotifications from '../lib/useRequestNotifications'
 
@@ -21,7 +21,7 @@ const CATEGORIES = ['all', 'chips', 'biscuits', 'sweets', 'namkeen', 'drinks', '
 
 function Shop() {
   const { products, loading, error } = useProducts()
-  const { totalItems } = useCart()
+  const { items, totalItems } = useCart()
   const { profile, user } = useAuth()
   const { theme, toggleTheme } = useThemePreference()
   const [tab, setTab] = useState('all')
@@ -47,6 +47,7 @@ function Shop() {
     )
     .sort((a, b) => Number((a.visibleStock ?? a.stock ?? 0) <= 0) - Number((b.visibleStock ?? b.stock ?? 0) <= 0))
   const displayName = profile?.name || user?.displayName || user?.email?.split('@')[0] || 'Customer'
+  const cartTotal = products.reduce((sum, product) => sum + (Number(product.price) || 0) * (items[product.id] || 0), 0)
   const showSearchResults = () => productsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   const requestSearchedProduct = value => {
     setRequestDraft(value)
@@ -54,7 +55,7 @@ function Shop() {
   }
 
   return (
-    <div className="shop-shell" data-theme={theme}>
+    <div className={`shop-shell${totalItems > 0 ? ' has-floating-cart' : ''}`} data-theme={theme}>
       <header className="store-header">
         <div className="shop-header-inner">
           <a className="store-brand" href="/" aria-label="SnackShop home"><span className="brand-stamp">S.</span>SnackShop<span className="brand-dot">.</span></a>
@@ -64,10 +65,6 @@ function Shop() {
             {shopOpen ? 'Open for pickup' : 'Pickup paused'}
           </span>
           <div className="shop-header-actions">
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
-            <motion.button className="bag-button" whileTap={{ scale: 0.96 }} onClick={() => setCartOpen(true)} aria-label={`Open cart with ${totalItems} items`}>
-              <ShoppingBag size={17} /><span className="bag-label">Your bag</span><span className="bag-count">{totalItems}</span>
-            </motion.button>
             <HeaderSearch query={query} onQueryChange={setQuery} resultCount={filtered.length} onShowResults={showSearchResults} onRequestProduct={requestSearchedProduct} />
             <ProfileMenu
               displayName={displayName}
@@ -127,6 +124,9 @@ function Shop() {
         <footer className="store-footer"><strong>SnackShop.</strong><span>A small shop for your everyday breaks.</span><span>Built by Rutuja.</span></footer>
       </main>
       <MyOrders watchOnly />
+      <AnimatePresence>
+        {totalItems > 0 && !cartOpen && <FloatingCartBar itemCount={totalItems} total={cartTotal} onOpen={() => setCartOpen(true)} />}
+      </AnimatePresence>
       <CartDrawer products={products} open={cartOpen} onClose={() => setCartOpen(false)} />
     </div>
   )
