@@ -97,7 +97,7 @@ function OrderCard({ order }) {
   )
 }
 
-export default function MyOrders() {
+export default function MyOrders({ embedded = false, watchOnly = false }) {
   const { user } = useAuth()
   const [orders, setOrders] = useState([])
   const [open, setOpen] = useState(true)
@@ -115,6 +115,7 @@ export default function MyOrders() {
   }, [user?.uid])
 
   useEffect(() => {
+    if (!watchOnly) return undefined
     const expireDrafts = () => {
       orders.filter(order => isExpiredDraft(order)).forEach(order => {
         updateOrderStatus(order.id, 'expire').catch(err => console.error('Order expiry:', err))
@@ -123,7 +124,9 @@ export default function MyOrders() {
     expireDrafts()
     const timer = setInterval(expireDrafts, 5000)
     return () => clearInterval(timer)
-  }, [orders])
+  }, [orders, watchOnly])
+
+  if (watchOnly) return null
 
   // Only show orders placed in the last 24 hours — this is purely a
   // display filter on the customer's own view. The order document itself
@@ -135,9 +138,18 @@ export default function MyOrders() {
     return Date.now() - created.getTime() < TWENTY_FOUR_HOURS_MS
   })
 
-  if (recentOrders.length === 0) return null
+  const visibleOrders = embedded ? orders : recentOrders
 
-  const activeCount = recentOrders.filter(o => o.status !== 'paid' && o.status !== 'cancelled').length
+  if (!embedded && visibleOrders.length === 0) return null
+
+  const activeCount = visibleOrders.filter(o => o.status !== 'paid' && o.status !== 'cancelled').length
+
+  if (embedded) return (
+    <div className="profile-history-list">
+      {visibleOrders.length === 0 && <p className="profile-history-empty">You have not placed any orders yet.</p>}
+      {visibleOrders.map(order => <OrderCard key={order.id} order={order} />)}
+    </div>
+  )
 
   return (
     <div style={{ marginTop: 36 }}>
@@ -159,7 +171,7 @@ export default function MyOrders() {
 
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {recentOrders.map(o => <OrderCard key={o.id} order={o} />)}
+          {visibleOrders.map(o => <OrderCard key={o.id} order={o} />)}
         </div>
       )}
     </div>

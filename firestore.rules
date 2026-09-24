@@ -12,6 +12,7 @@ service cloud.firestore {
     //   required; reservationActive is required for new orders; expiresAt is
     //   required for new UPI drafts; cancelledBy is added when cancelled.
     // requests: userId/customerName/message/status/resolved/createdAt required;
+    //   customerSeenStatus/customerSeenAt track durable customer notifications;
     //   completedAt is added by an admin.
     // ledger: supports both older spreadsheet-style records and the current
     // typed transaction format used by the finance activity view.
@@ -120,7 +121,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId', 'customerName', 'message', 'status',
-          'resolved', 'createdAt', 'completedAt'
+          'resolved', 'createdAt', 'completedAt',
+          'customerSeenStatus', 'customerSeenAt'
         ])
         && data.userId is string
         && data.userId.size() > 0
@@ -134,7 +136,10 @@ service cloud.firestore {
         && data.status in ['pending', 'in_progress', 'completed']
         && data.resolved is bool
         && data.createdAt is timestamp
-        && (!('completedAt' in data) || data.completedAt is timestamp);
+        && (!('completedAt' in data) || data.completedAt is timestamp)
+        && (!('customerSeenStatus' in data)
+          || data.customerSeenStatus in ['pending', 'in_progress', 'completed'])
+        && (!('customerSeenAt' in data) || data.customerSeenAt is timestamp);
     }
 
     function isValidLedgerEntry(data) {
@@ -291,6 +296,13 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.resolved == false
         && request.resource.data.createdAt == request.time
+        && (
+          (!('customerSeenStatus' in request.resource.data)
+            && !('customerSeenAt' in request.resource.data))
+          ||
+          (request.resource.data.customerSeenStatus == 'pending'
+            && request.resource.data.customerSeenAt == request.time)
+        )
         && !('completedAt' in request.resource.data);
 
       allow read: if isSignedIn()
@@ -299,7 +311,19 @@ service cloud.firestore {
       allow update: if isAdmin()
         && isValidRequest(request.resource.data)
         && request.resource.data.userId == resource.data.userId
-        && request.resource.data.createdAt == resource.data.createdAt;
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'resolved', 'completedAt']);
+
+      allow update: if isOwner(resource.data.userId)
+        && isValidRequest(request.resource.data)
+        && request.resource.data.customerSeenStatus
+          == (('status' in resource.data)
+            ? resource.data.status
+            : (resource.data.resolved ? 'completed' : 'pending'))
+        && request.resource.data.customerSeenAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['customerSeenStatus', 'customerSeenAt']);
       allow delete: if isAdmin();
     }
 

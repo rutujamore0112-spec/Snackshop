@@ -443,7 +443,7 @@ export default function AdminPage() {
           snap.docChanges().forEach(change => {
             const data = change.doc.data()
             if (change.type === 'added' && ACTIVE_RESERVING_STATUSES.includes(data.status)) {
-              toast(`🛎️ New order from ${data.customerName}`)
+              toast(`New order from ${data.customerName}`)
             }
             if (change.type === 'modified' && (data.status === 'utr_submitted' || data.status === 'pending')) {
               toast(`Payment submitted by ${data.customerName}`)

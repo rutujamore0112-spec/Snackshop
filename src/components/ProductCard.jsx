@@ -1,4 +1,4 @@
-import { Minus, Plus, ShoppingBag } from 'lucide-react'
+import { Minus, Plus, ShoppingBag, Zap } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useCart } from '../lib/CartContext'
 
@@ -62,7 +62,7 @@ export default function ProductCard({ product }) {
         </div>
 
         <div className={`product-stock-message${lowStock ? ' stock-availability-badge is-low' : ''}${soldOut ? ' is-sold-out-message' : ''}`}>
-          {lowStock && <span aria-hidden="true">⚡</span>}
+          {lowStock && <Zap size={12} aria-hidden="true" />}
           {stockMessage}
         </div>
 

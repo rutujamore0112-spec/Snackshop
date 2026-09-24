@@ -12,12 +12,7 @@ export default function ThemeToggle({ theme, onToggle }) {
       aria-label={`Switch to ${dark ? 'light' : 'dark'} mode`}
       title={`Switch to ${dark ? 'light' : 'dark'} mode`}
     >
-      <span className="theme-toggle-track" aria-hidden="true">
-        <motion.span className="theme-toggle-thumb" animate={{ x: dark ? 17 : 0 }} transition={{ type: 'spring', stiffness: 520, damping: 34 }}>
-          {dark ? <Moon size={10} /> : <Sun size={10} />}
-        </motion.span>
-      </span>
-      <span className="theme-toggle-label">{dark ? 'Light' : 'Dark'}</span>
+      {dark ? <Sun size={18} /> : <Moon size={18} />}
     </motion.button>
   )
 }
