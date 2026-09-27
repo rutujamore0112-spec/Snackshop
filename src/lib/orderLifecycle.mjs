@@ -81,10 +81,22 @@ export async function transitionOrder(tx, orderRef, productRef, status, cancelle
       tx.update(ref, updates)
     }
   }
+  if (status === 'paid' && order.paymentStatus === 'captured_needs_review' && !holdsReservation) {
+    const products = await readProducts()
+    for (const { qty, snapshot: product } of products) {
+      if (!product.exists() || (product.data().stock || 0) - (product.data().reserved || 0) < qty) {
+        throw new Error('Restock the items before confirming this captured payment')
+      }
+    }
+    for (const { ref, qty, snapshot: product } of products) {
+      tx.update(ref, { stock: product.data().stock - qty })
+    }
+  }
   if (status === 'delete') tx.delete(orderRef)
   else tx.update(orderRef, {
     status: status === 'expire' ? 'cancelled' : status,
     reservationActive: false,
+    ...(status === 'paid' && order.paymentStatus === 'captured_needs_review' ? { paymentStatus: 'captured' } : {}),
     ...(status === 'expire' ? { cancelledBy: 'timeout' } : cancelledBy ? { cancelledBy } : {}),
   })
   return status === 'expire' ? 'expired' : status

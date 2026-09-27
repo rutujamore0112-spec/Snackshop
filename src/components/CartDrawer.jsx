@@ -6,7 +6,7 @@ import { db } from '../lib/firebase'
 import { useCart } from '../lib/CartContext'
 import { useAuth } from '../lib/AuthContext'
 import { updateOrderStatus } from '../lib/orders'
-import { localRazorpayEnabled, openLocalRazorpayCheckout } from '../lib/localRazorpay'
+import { razorpayEnabled, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay'
 
 const UPI_ID = 'rutujamore0112-4@okicici'
 const OWNER_NAME = 'Rutuja More'
@@ -22,6 +22,8 @@ export default function CartDrawer({ products, open, onClose }) {
   const [cancelling, setCancelling] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const busyRef = useRef(false)
+  const paymentReceivedRef = useRef(null)
+  const [razorpayResult, setRazorpayResult] = useState(null)
 
   const [finalTotal, setFinalTotal] = useState(0)
   const [finalName, setFinalName] = useState('')
@@ -35,12 +37,11 @@ export default function CartDrawer({ products, open, onClose }) {
 
   useEffect(() => {
     if (step !== 'qr' && step !== 'razorpay') return
-    const deadline = deadlineRef.current || Date.now() + TIMER_SECONDS * 1000
-    setSecondsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)))
+    setSecondsLeft(Math.max(0, Math.ceil(((deadlineRef.current || Date.now() + TIMER_SECONDS * 1000) - Date.now()) / 1000)))
     timerRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      const remaining = Math.max(0, Math.ceil(((deadlineRef.current || Date.now()) - Date.now()) / 1000))
       setSecondsLeft(remaining)
-      if (remaining === 0 && !busyRef.current) {
+      if (remaining === 0 && !busyRef.current && !paymentReceivedRef.current) {
         clearInterval(timerRef.current)
         handleAutoCancel()
       }
@@ -191,7 +192,7 @@ export default function CartDrawer({ products, open, onClose }) {
     }
   }
 
-  const handleLocalRazorpay = async () => {
+  const handleRazorpay = async () => {
     const id = await createOrder('upi')
     if (!id) return
 
@@ -199,30 +200,56 @@ export default function CartDrawer({ products, open, onClose }) {
     busyRef.current = true
     setSubmitting(true)
     try {
-      await openLocalRazorpayCheckout({
-        amountRupees: total,
-        receipt: id,
+      const result = await openRazorpayCheckout({
+        user,
+        firestoreOrderId: id,
         customerName,
         email: user?.email,
+        onOrderCreated: expiresAtMillis => { deadlineRef.current = expiresAtMillis },
+        onPaymentReceived: payment => { paymentReceivedRef.current = payment },
       })
-      busyRef.current = false
-      setSubmitting(false)
-      const submitted = await submitPaidOrder(id)
-      if (submitted) toast.success('Test payment verified')
+      setRazorpayResult(result)
+      clearInterval(timerRef.current)
+      if (!result.test) clearCart()
+      setStep('done')
+      toast.success(result.test ? 'Test payment verified; no real order was placed' : result.review ? 'Payment received; order needs review' : 'Payment verified')
     } catch (err) {
-      console.error('Local Razorpay checkout failed:', err)
+      console.error('Razorpay checkout failed:', err)
+      if (paymentReceivedRef.current) {
+        setStep('verification_error')
+        toast.error('Payment received. Confirmation is pending; keep your payment ID.')
+      } else {
+        await releaseOrder(id)
+        setOrderId(null)
+        deadlineRef.current = null
+        setStep('method')
+        toast.error(err.message || 'Payment was not completed')
+      }
+    } finally {
       busyRef.current = false
       setSubmitting(false)
-      await releaseOrder(id)
-      setOrderId(null)
-      deadlineRef.current = null
-      setStep('method')
-      toast.error(err.message || 'Test payment was not completed')
+    }
+  }
+
+  const retryVerification = async () => {
+    if (!orderId || !paymentReceivedRef.current || busyRef.current) return
+    busyRef.current = true
+    setSubmitting(true)
+    try {
+      const result = await verifyRazorpayPayment(user, orderId, paymentReceivedRef.current)
+      setRazorpayResult(result)
+      if (!result.test) clearCart()
+      setStep('done')
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      busyRef.current = false
+      setSubmitting(false)
     }
   }
 
   const handleCancelOrder = async () => {
-    if (busyRef.current) return
+    if (busyRef.current || paymentReceivedRef.current) return
     busyRef.current = true
     setCancelling(true)
     const released = await releaseOrder(orderId)
@@ -237,7 +264,7 @@ export default function CartDrawer({ products, open, onClose }) {
   }
 
   const handleAutoCancel = async () => {
-    if (!orderId || busyRef.current) return
+    if (!orderId || busyRef.current || paymentReceivedRef.current) return
     busyRef.current = true
     setCancelling(true)
     try {
@@ -259,13 +286,15 @@ export default function CartDrawer({ products, open, onClose }) {
     setStep('cart')
     setOrderId(null)
     deadlineRef.current = null
+    paymentReceivedRef.current = null
+    setRazorpayResult(null)
     if (!keepCart) clearCart()
     onClose()
   }
 
   const handleClose = async () => {
     if (busyRef.current) return
-    if ((step === 'qr' || step === 'razorpay') && orderId && !(await handleCancelOrder())) return
+    if ((step === 'qr' || step === 'razorpay') && orderId && !paymentReceivedRef.current && !(await handleCancelOrder())) return
     resetAndClose()
   }
 
@@ -290,7 +319,8 @@ export default function CartDrawer({ products, open, onClose }) {
             {step === 'cart' && 'Your Cart'}
             {step === 'method' && 'Choose Payment'}
             {step === 'qr' && 'Scan & Pay'}
-            {step === 'razorpay' && 'Test Payment'}
+            {step === 'razorpay' && 'Razorpay Checkout'}
+            {step === 'verification_error' && 'Payment received'}
             {step === 'cash_pending' && 'Pay by Cash'}
             {step === 'done' && 'Order Placed!'}
           </h2>
@@ -364,10 +394,10 @@ export default function CartDrawer({ products, open, onClose }) {
                 <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay by UPI</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Scan QR, instant confirmation</div></div>
                 <ArrowRight size={15} color="var(--text-hint)" />
               </button>
-              {localRazorpayEnabled && (
-                <button onClick={handleLocalRazorpay} disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
+              {razorpayEnabled && (
+                <button onClick={handleRazorpay} disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
                   <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CreditCard size={18} color="var(--accent)" /></div>
-                  <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Razorpay test checkout</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Localhost only · test mode</div></div>
+                  <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Razorpay test checkout</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Test payment; no real charge or order</div></div>
                   <ArrowRight size={15} color="var(--text-hint)" />
                 </button>
               )}
@@ -405,14 +435,22 @@ export default function CartDrawer({ products, open, onClose }) {
             </div>
           )}
 
-          {/* LOCAL RAZORPAY TEST */}
+          {/* RAZORPAY */}
           {step === 'razorpay' && (
             <div style={{ textAlign: 'center', padding: '56px 20px', animation: 'popIn 0.3s ease' }}>
               <CreditCard size={54} color="var(--accent)" style={{ margin: '0 auto 18px', display: 'block' }} />
               <h3 style={{ fontFamily: 'Syne', fontSize: 21, fontWeight: 800, marginBottom: 10 }}>Razorpay test checkout</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 285, margin: '0 auto' }}>
-                Complete or close the Razorpay test window. This option is available only on the local development server.
+                Complete the payment in the Razorpay window.
               </p>
+            </div>
+          )}
+
+          {step === 'verification_error' && (
+            <div style={{ textAlign: 'center', padding: '50px 20px' }}>
+              <h3 style={{ marginBottom: 12 }}>Payment received; confirmation pending</h3>
+              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>Do not pay again. Keep payment ID {paymentReceivedRef.current?.razorpay_payment_id} and contact the shop if confirmation does not appear.</p>
+              <button onClick={retryVerification} disabled={submitting} style={{ marginTop: 20, padding: 12, background: 'var(--accent)', borderRadius: 10 }}>{submitting ? 'Checking...' : 'Retry confirmation'}</button>
             </div>
           )}
 
@@ -435,9 +473,9 @@ export default function CartDrawer({ products, open, onClose }) {
           {step === 'done' && (
             <div style={{ textAlign: 'center', padding: '50px 20px', animation: 'popIn 0.35s ease' }}>
               <CheckCircle size={62} color="var(--success)" style={{ margin: '0 auto 16px', display: 'block' }} />
-              <h3 style={{ fontFamily: 'Syne', fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Order submitted!</h3>
+              <h3 style={{ fontFamily: 'Syne', fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{razorpayResult?.test ? 'Test payment verified!' : 'Order submitted!'}</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 280, margin: '0 auto' }}>
-                Rutuja will verify your payment and confirm your order. Stock updates automatically once confirmed.
+                {razorpayResult ? (razorpayResult.test ? 'This was a Razorpay test transaction. No real money was charged, and no stock was deducted.' : razorpayResult.review ? 'Your payment was captured. The shop will review this order and contact you.' : 'Your payment was verified and your order is confirmed.') : 'Rutuja will verify your payment and confirm your order. Stock updates automatically once confirmed.'}
               </p>
               <div style={{ background: 'var(--surface2)', borderRadius: 12, padding: '12px 16px', marginTop: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
                 Order by <strong style={{ color: 'var(--text)' }}>{finalName}</strong> · <strong style={{ color: 'var(--accent)', fontFamily: 'Syne' }}>₹{finalTotal}</strong>

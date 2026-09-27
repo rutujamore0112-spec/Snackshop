@@ -84,7 +84,9 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'customerName', 'userId', 'items', 'total', 'status',
           'paymentMethod', 'createdAt', 'expiresAt',
-          'reservationActive', 'cancelledBy'
+          'reservationActive', 'cancelledBy',
+          'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
+          'paymentId', 'paymentStatus', 'paidAt'
         ])
         && data.customerName is string
         && data.customerName.size() > 0
@@ -103,6 +105,12 @@ service cloud.firestore {
         && data.createdAt is timestamp
         && (!('expiresAt' in data) || data.expiresAt is timestamp)
         && (!('reservationActive' in data) || data.reservationActive is bool)
+        && (!('razorpayOrderId' in data) || (data.razorpayOrderId is string && data.razorpayOrderId.size() <= 100))
+        && (!('razorpayAmount' in data) || (data.razorpayAmount is int && data.razorpayAmount >= 100))
+        && (!('razorpayCurrency' in data) || data.razorpayCurrency == 'INR')
+        && (!('paymentId' in data) || (data.paymentId is string && data.paymentId.size() <= 100))
+        && (!('paymentStatus' in data) || data.paymentStatus in ['captured', 'captured_needs_review', 'test_captured'])
+        && (!('paidAt' in data) || data.paidAt is timestamp)
         && (!('cancelledBy' in data)
           || (data.cancelledBy is string
             && data.cancelledBy in ['customer', 'admin', 'timeout']));
@@ -111,7 +119,9 @@ service cloud.firestore {
     function immutableOrderFieldsUnchanged() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
         'customerName', 'userId', 'items', 'total',
-        'paymentMethod', 'createdAt', 'expiresAt'
+        'paymentMethod', 'createdAt', 'expiresAt',
+        'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
+        'paymentId', 'paymentStatus', 'paidAt'
       ]);
     }
 
@@ -222,6 +232,10 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow create: if isSignedIn()
         && isValidOrder(request.resource.data)
+        && !request.resource.data.keys().hasAny([
+          'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
+          'paymentId', 'paymentStatus', 'paidAt'
+        ])
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.reservationActive is bool
@@ -250,6 +264,7 @@ service cloud.firestore {
       allow update: if isOwner(resource.data.userId)
         && isValidOrder(request.resource.data)
         && immutableOrderFieldsUnchanged()
+        && !('razorpayOrderId' in resource.data)
         && resource.data.paymentMethod == 'upi'
         && resource.data.status == 'draft'
         && resource.data.reservationActive == false
@@ -263,6 +278,7 @@ service cloud.firestore {
       allow update: if isOwner(resource.data.userId)
         && isValidOrder(request.resource.data)
         && immutableOrderFieldsUnchanged()
+        && !('paymentId' in resource.data)
         && resource.data.status in ['draft', 'pending', 'utr_submitted']
         && request.resource.data.status == 'cancelled'
         && request.resource.data.cancelledBy == 'customer'

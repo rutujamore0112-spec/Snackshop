@@ -24,6 +24,7 @@ const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 // Anything outside this set (paid / cancelled) has already been settled,
 // so there's nothing left to release.
 const ACTIVE_RESERVING_STATUSES = ['pending', 'utr_submitted', 'draft']
+const needsOrderAction = order => ACTIVE_RESERVING_STATUSES.includes(order.status) && order.paymentStatus !== 'test_captured'
 
 export const REQUEST_STATUSES = {
   pending:     { label: 'Pending',     color: 'var(--warning)',  dim: 'var(--warning-dim)',  icon: Clock },
@@ -145,7 +146,7 @@ function groupByMonth(orders) {
 function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete, onDeleteAll }) {
   const [collapsed, setCollapsed] = useState(false)
   const paidTotal = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const pendingCount = orders.filter(o => ACTIVE_RESERVING_STATUSES.includes(o.status)).length
+  const pendingCount = orders.filter(needsOrderAction).length
 
   return (
     <div style={{ marginBottom: 20 }}>
@@ -186,7 +187,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
             style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}
           >
             {orders.map(o => {
-              const needsAction = ACTIVE_RESERVING_STATUSES.includes(o.status)
+              const needsAction = needsOrderAction(o)
               const isProcessing = processing[o.id]
               return (
                 <motion.div 
@@ -205,6 +206,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{o.customerName}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-hint)', fontFamily: 'monospace', marginBottom: 4 }}>Order ID: {o.id}</div>
                       
                       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontStyle: o.status === 'paid' ? 'normal' : 'italic' }}>
                         {(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}
@@ -215,6 +217,9 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                           UTR: <strong style={{ color: 'var(--accent)' }}>{o.utr}</strong>
                         </div>
                       )}
+                      {o.paymentId && <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>Razorpay payment: {o.paymentId}</div>}
+                      {o.paymentStatus === 'captured_needs_review' && <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>Payment captured. Check stock, then confirm or arrange a refund in Razorpay.</div>}
+                      {o.paymentStatus === 'test_captured' && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4 }}>Razorpay test payment. No real money or stock movement.</div>}
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                         {o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}
                       </div>
@@ -222,7 +227,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                       <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 18 }}>₹{o.total}</div>
                       <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 100, background: o.status === 'paid' ? 'var(--success-dim)' : o.status === 'cancelled' ? 'var(--danger-dim)' : o.status === 'utr_submitted' ? 'var(--accent-dim)' : 'var(--warning-dim)', color: o.status === 'paid' ? 'var(--success)' : o.status === 'cancelled' ? 'var(--danger)' : o.status === 'utr_submitted' ? 'var(--accent)' : 'var(--warning)' }}>
-                        {o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'pending verify' : o.status}
+                        {o.paymentStatus === 'test_captured' ? 'test payment' : o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'pending verify' : o.status}
                       </span>
                       {o.status === 'cancelled' && o.cancelledBy && (
                         <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>
@@ -442,10 +447,10 @@ export default function AdminPage() {
         if (!isInitialOrdersLoad.current) {
           snap.docChanges().forEach(change => {
             const data = change.doc.data()
-            if (change.type === 'added' && ACTIVE_RESERVING_STATUSES.includes(data.status)) {
+            if (change.type === 'added' && needsOrderAction(data)) {
               toast(`New order from ${data.customerName}`)
             }
-            if (change.type === 'modified' && (data.status === 'utr_submitted' || data.status === 'pending')) {
+            if (change.type === 'modified' && needsOrderAction(data) && (data.status === 'utr_submitted' || data.status === 'pending')) {
               toast(`Payment submitted by ${data.customerName}`)
             }
           })
@@ -493,8 +498,8 @@ export default function AdminPage() {
   }
 
   const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const pendingPayments = orders.filter(o => o.status === 'utr_submitted').length
-  const needsActionCount = orders.filter(o => ACTIVE_RESERVING_STATUSES.includes(o.status)).length
+  const pendingPayments = orders.filter(o => o.status === 'utr_submitted' && o.paymentStatus !== 'test_captured').length
+  const needsActionCount = orders.filter(needsOrderAction).length
   const pendingReqs = requests.filter(r => !r.resolved).length
   const monthGroups = groupByMonth(orders)
   const requestMonthGroups = groupByMonth(requests)
@@ -535,6 +540,7 @@ export default function AdminPage() {
   }
 
   const markAsPaid = async (order) => {
+    if (order.paymentStatus === 'test_captured') return
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {

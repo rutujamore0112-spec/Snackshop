@@ -16,9 +16,10 @@ const ORDER_STATUSES = {
   paid:          { label: 'Confirmed',             color: 'var(--success)', dim: 'var(--success-dim)', Icon: CheckCircle, hint: 'Order confirmed! See you soon.' },
   cancelled:     { label: 'Cancelled',             color: 'var(--danger)',  dim: 'var(--danger-dim)',  Icon: XCircle,     hint: 'This order was cancelled.' },
 }
+const TEST_STATUS = { label: 'Test payment', color: 'var(--accent)', dim: 'var(--accent-dim)', Icon: CheckCircle, hint: 'Test transaction only. No real charge or stock deduction.' }
 
-function StatusBadge({ status }) {
-  const cfg = ORDER_STATUSES[status] || ORDER_STATUSES.pending
+function StatusBadge({ status, paymentStatus }) {
+  const cfg = paymentStatus === 'test_captured' ? TEST_STATUS : ORDER_STATUSES[status] || ORDER_STATUSES.pending
   const { Icon } = cfg
   return (
     <span style={{
@@ -33,10 +34,10 @@ function StatusBadge({ status }) {
 }
 
 function OrderCard({ order }) {
-  const cfg = ORDER_STATUSES[order.status] || ORDER_STATUSES.pending
+  const cfg = order.paymentStatus === 'test_captured' ? TEST_STATUS : ORDER_STATUSES[order.status] || ORDER_STATUSES.pending
   const MethodIcon = order.paymentMethod === 'cash' ? Banknote : QrCode
   const [cancelling, setCancelling] = useState(false)
-  const canCancel = ACTIVE_ORDER_STATUSES.includes(order.status)
+  const canCancel = ACTIVE_ORDER_STATUSES.includes(order.status) && !order.paymentId
 
   const handleCancel = async () => {
     if (!confirm('Cancel this order?')) return
@@ -60,9 +61,9 @@ function OrderCard({ order }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
           <MethodIcon size={12} />
-          {order.paymentMethod === 'cash' ? 'Cash on pickup' : 'UPI'}
+          {order.paymentStatus === 'test_captured' ? 'Razorpay test' : order.paymentMethod === 'cash' ? 'Cash on pickup' : 'UPI'}
         </div>
-        <StatusBadge status={order.status} />
+        <StatusBadge status={order.status} paymentStatus={order.paymentStatus} />
       </div>
 
       <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 6 }}>
