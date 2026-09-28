@@ -2,6 +2,7 @@ import Razorpay from "razorpay";
 import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { razorpayConfiguration } from "../../server/razorpayConfig.mjs";
 
 function getFirebaseAdmin() {
   if (getApps().length > 0) {
@@ -30,10 +31,12 @@ function getFirebaseAdmin() {
 function getRazorpay() {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  const config = razorpayConfiguration(process.env);
 
   if (!keyId || !keySecret) {
     throw new Error("Razorpay credentials are not configured");
   }
+  if (config.mode === 'unconfigured') throw new Error('Razorpay key ID must be a test or live key');
 
   return new Razorpay({
     key_id: keyId,
@@ -256,8 +259,9 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: "Razorpay authentication failed" });
     }
 
-    return res.status(error.message === "FIREBASE_SERVICE_ACCOUNT is not configured" || error.message === "Razorpay credentials are not configured" ? 503 : 500).json({
-      error: error.message === "FIREBASE_SERVICE_ACCOUNT is not configured" || error.message === "Razorpay credentials are not configured" ? "Payment service is not configured" : "Unable to create Razorpay order",
+    const configurationError = ["FIREBASE_SERVICE_ACCOUNT is not configured", "Razorpay credentials are not configured", 'Razorpay key ID must be a test or live key'].includes(error.message);
+    return res.status(configurationError ? 503 : 500).json({
+      error: configurationError ? "Payment service is not configured" : "Unable to create Razorpay order",
     });
   }
 }

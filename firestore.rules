@@ -86,7 +86,8 @@ service cloud.firestore {
           'paymentMethod', 'createdAt', 'expiresAt',
           'reservationActive', 'cancelledBy', 'cancelledAt',
           'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
-          'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt'
+          'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt',
+          'adminArchivedAt'
         ])
         && data.customerName is string
         && data.customerName.size() > 0
@@ -112,6 +113,7 @@ service cloud.firestore {
         && (!('paymentStatus' in data) || data.paymentStatus in ['captured', 'captured_needs_review', 'test_captured'])
         && (!('paidAt' in data) || data.paidAt is timestamp)
         && (!('acceptedAt' in data) || data.acceptedAt is timestamp)
+        && (!('adminArchivedAt' in data) || data.adminArchivedAt is timestamp)
         && (!('cancelledAt' in data) || data.cancelledAt is timestamp)
         && (!('cancelledBy' in data)
           || (data.cancelledBy is string
@@ -123,7 +125,8 @@ service cloud.firestore {
         'customerName', 'userId', 'items', 'total',
         'paymentMethod', 'createdAt', 'expiresAt',
         'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
-        'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt'
+        'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt',
+        'adminArchivedAt'
       ]);
     }
 
@@ -236,7 +239,7 @@ service cloud.firestore {
         && !request.resource.data.keys().hasAny([
           'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
           'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt',
-          'cancelledAt'
+          'cancelledAt', 'adminArchivedAt'
         ])
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.createdAt == request.time

@@ -203,8 +203,9 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  style={{ background: 'var(--surface)', border: `2px solid ${awaitingAcceptance ? 'var(--success)' : needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
+                  style={{ background: 'var(--surface)', border: `2px solid ${o.status === 'cancelled' ? 'var(--danger)' : awaitingAcceptance ? 'var(--success)' : needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
                 >
+                  {o.status === 'cancelled' && <div style={{ background: 'var(--danger-dim)', color: 'var(--danger)', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 14, fontWeight: 800 }}>{cancellationLabel(o)} · {o.cancelledAt?.toDate?.()?.toLocaleString('en-IN') || 'time unavailable'}</div>}
                   {needsAction && !capturedRazorpay && (
                     <div style={{ background: 'var(--warning-dim)', color: 'var(--warning)', padding: '12px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 15, fontWeight: 800 }}>
                       {o.paymentMethod === 'cash' ? 'VERIFY CASH RECEIVED BEFORE ACCEPTING' : 'VERIFY UPI PAYMENT BEFORE ACCEPTING'}
@@ -247,11 +248,11 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                           by {o.cancelledBy === 'customer' ? 'customer' : 'you'}
                         </span>
                       )}
-                      {!capturedRazorpay && <motion.button
+                      {(!capturedRazorpay || o.acceptedAt) && <motion.button
                         whileTap={{ scale: 0.9 }}
-                        onClick={() => onDelete(o.id)}
+                        onClick={() => onDelete(o)}
                         style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '3px 8px', color: 'var(--danger)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}
-                        title="Delete this order"
+                        title={capturedRazorpay ? 'Remove from admin orders; keep payment record' : 'Delete this order'}
                       >
                         <Trash2 size={10} /> Delete
                       </motion.button>}
@@ -524,7 +525,6 @@ export default function AdminPage() {
 
   const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
   const visibleOrders = orders.filter(isVisibleAdminOrder)
-  const cancelledOrders = orders.filter(o => o.status === 'cancelled')
   const pendingPayments = visibleOrders.filter(o => (o.paymentMethod === 'cash' && o.status === 'pending') || (o.status === 'utr_submitted' && !o.paymentId)).length
   const awaitingAcceptance = visibleOrders.filter(o => isCapturedRazorpayOrder(o) && !o.acceptedAt).length
   const needsActionCount = visibleOrders.filter(needsOrderAction).length
@@ -633,10 +633,18 @@ export default function AdminPage() {
     for (const order of selected.filter(o => !isCapturedRazorpayOrder(o))) await updateOrderStatus(order.id, 'delete')
   }
 
-  const deleteOrder = async (id) => {
+  const deleteOrder = async (order) => {
+    if (isCapturedRazorpayOrder(order)) {
+      if (!order.acceptedAt || !confirm('Remove this accepted Razorpay order from the admin list? Its payment record and sales total will be retained.')) return
+      try {
+        await updateDoc(doc(db, 'orders', order.id), { adminArchivedAt: serverTimestamp() })
+        toast.success('Order removed from admin list')
+      } catch (err) { toast.error('Could not remove order: ' + err.message) }
+      return
+    }
     if (!confirm('Delete this order permanently?')) return
     try {
-      await updateOrderStatus(id, 'delete')
+      await updateOrderStatus(order.id, 'delete')
       toast.success('Order deleted')
     } catch (err) { toast.error('Could not delete order: ' + err.message) }
   }
@@ -754,7 +762,6 @@ export default function AdminPage() {
   const tabs = [
     { id: 'products', label: 'Products', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
-    { id: 'cancelled', label: 'Cancelled', icon: X },
     { id: 'requests', label: 'Requests', icon: MessageSquare },
     { id: 'finance', label: 'Finance', icon: Wallet },
   ]
@@ -866,9 +873,6 @@ export default function AdminPage() {
                 <span className="admin-tab-badge" style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
                   {needsActionCount}
                 </span>
-              )}
-              {t.id === 'cancelled' && cancelledOrders.length > 0 && (
-                <span className="admin-tab-badge" style={{ background: 'var(--danger)', color: 'white', borderRadius: 100, minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, padding: '0 4px' }}>{cancelledOrders.length}</span>
               )}
               {t.id === 'requests' && pendingReqs > 0 && (
                 <span className="admin-tab-badge" style={{ background: 'var(--danger)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
@@ -1025,21 +1029,6 @@ export default function AdminPage() {
                 ))}
               </>
             )}
-          </div>
-        )}
-
-        {tab === 'cancelled' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {cancelledOrders.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>No cancelled orders</div>
-            ) : cancelledOrders.map(order => (
-              <div key={order.id} style={{ background: 'var(--surface)', border: '2px solid var(--danger)', borderRadius: 'var(--radius)', padding: '16px 18px' }}>
-                <div style={{ background: 'var(--danger-dim)', color: 'var(--danger)', padding: '10px 12px', borderRadius: 8, fontFamily: 'Syne', fontWeight: 800, marginBottom: 12 }}>{cancellationLabel(order)}</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontWeight: 700 }}><span>{order.customerName}</span><span>₹{order.total}</span></div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{(order.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}</div>
-                <div style={{ color: 'var(--text-hint)', fontSize: 11, marginTop: 8 }}>Cancelled {order.cancelledAt?.toDate?.()?.toLocaleString('en-IN') || 'time unavailable'} · {order.paymentMethod === 'cash' ? 'Cash' : 'Razorpay'}</div>
-              </div>
-            ))}
           </div>
         )}
 

@@ -1,4 +1,5 @@
 import { FieldValue } from 'firebase-admin/firestore'
+import { razorpayKeyMode } from './razorpayConfig.mjs'
 
 // Called by both the checkout callback and the captured-payment webhook.
 // A captured payment is recorded even if stock can no longer be fulfilled.
@@ -20,7 +21,9 @@ export async function settleCapturedPayment(db, orderRef, payment) {
     }
 
     // Test-mode captures prove the integration without consuming real stock.
-    if (process.env.RAZORPAY_KEY_ID?.startsWith('rzp_test_')) {
+    const keyMode = razorpayKeyMode(process.env.RAZORPAY_KEY_ID)
+    if (keyMode === 'unconfigured') throw new Error('Razorpay key ID is not configured')
+    if (keyMode === 'test') {
       transaction.update(orderRef, {
         status: 'utr_submitted',
         paymentId: payment.id,

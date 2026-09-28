@@ -2,7 +2,8 @@ export const isCapturedRazorpayOrder = order =>
   Boolean(order.paymentId) && ['captured', 'captured_needs_review', 'test_captured'].includes(order.paymentStatus)
 
 export function isVisibleAdminOrder(order) {
-  if (order.status === 'cancelled') return false
+  if (order.adminArchivedAt) return false
+  if (order.status === 'cancelled') return true
   if (order.paymentMethod === 'cash') return true
   if (order.paymentMethod === 'razorpay') return isCapturedRazorpayOrder(order)
   // Older QR orders still need to be handled until they are resolved.

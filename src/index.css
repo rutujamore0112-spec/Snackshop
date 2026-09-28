@@ -1,4 +1,6 @@
 /* Checkout progress */
+.checkout-status-screen { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: var(--bg); }
+.checkout-status-screen .checkout-status { width: min(100%, 420px); min-height: min(100%, 600px); }
 .checkout-status { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 4px; text-align: center; }
 .checkout-status-icon { position: relative; display: grid; place-items: center; width: 96px; height: 96px; margin-bottom: 28px; border-radius: 50%; background: var(--accent-dim); color: var(--accent); }
 .checkout-status-spinner { position: absolute; inset: 4px; animation: checkout-spin 1.3s linear infinite; }

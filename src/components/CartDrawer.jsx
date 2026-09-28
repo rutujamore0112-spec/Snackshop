@@ -269,6 +269,7 @@ export default function CartDrawer({ products, open, onClose }) {
   }
 
   if (!open) return null
+  const showCheckoutScreen = ['creating_payment', 'razorpay', 'confirming_payment', 'creating_cash', 'cancelling_payment'].includes(step)
 
   return (
     <>
@@ -360,7 +361,7 @@ export default function CartDrawer({ products, open, onClose }) {
             </div>
           )}
 
-          {['creating_payment', 'razorpay', 'confirming_payment', 'creating_cash', 'cancelling_payment', 'verification_error'].includes(step) && (
+          {step === 'verification_error' && (
             <CheckoutStatus step={step} orderId={orderId} paymentId={paymentReceivedRef.current?.razorpay_payment_id} onRetry={retryVerification} retrying={submitting} />
           )}
 
@@ -409,6 +410,7 @@ export default function CartDrawer({ products, open, onClose }) {
         )}
 
       </div>
+      {showCheckoutScreen && <div className="checkout-status-screen"><CheckoutStatus step={step} orderId={orderId} paymentId={paymentReceivedRef.current?.razorpay_payment_id} /></div>}
     </>
   )
 }
