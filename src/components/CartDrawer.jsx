@@ -210,7 +210,7 @@ export default function CartDrawer({ products, open, onClose }) {
       })
       setRazorpayResult(result)
       clearInterval(timerRef.current)
-      if (!result.test) clearCart()
+      clearCart()
       setStep('done')
       toast.success(result.test ? 'Test payment verified; no real order was placed' : result.review ? 'Payment received; order needs review' : 'Payment verified')
     } catch (err) {
@@ -238,7 +238,7 @@ export default function CartDrawer({ products, open, onClose }) {
     try {
       const result = await verifyRazorpayPayment(user, orderId, paymentReceivedRef.current)
       setRazorpayResult(result)
-      if (!result.test) clearCart()
+      clearCart()
       setStep('done')
     } catch (error) {
       toast.error(error.message)
@@ -475,7 +475,7 @@ export default function CartDrawer({ products, open, onClose }) {
               <CheckCircle size={62} color="var(--success)" style={{ margin: '0 auto 16px', display: 'block' }} />
               <h3 style={{ fontFamily: 'Syne', fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{razorpayResult?.test ? 'Test payment verified!' : 'Order submitted!'}</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 280, margin: '0 auto' }}>
-                {razorpayResult ? (razorpayResult.test ? 'This was a Razorpay test transaction. No real money was charged, and no stock was deducted.' : razorpayResult.review ? 'Your payment was captured. The shop will review this order and contact you.' : 'Your payment was verified and your order is confirmed.') : 'Rutuja will verify your payment and confirm your order. Stock updates automatically once confirmed.'}
+                {razorpayResult ? (razorpayResult.test ? 'This was a Razorpay test transaction. No real money was charged, and no stock was deducted.' : razorpayResult.review ? 'Your payment was captured. The shop will review stock before accepting your order or arranging a refund.' : 'Your payment was verified and stock was updated. The shop will accept your order shortly.') : 'Rutuja will verify your payment and confirm your order. Stock updates automatically once confirmed.'}
               </p>
               <div style={{ background: 'var(--surface2)', borderRadius: 12, padding: '12px 16px', marginTop: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
                 Order by <strong style={{ color: 'var(--text)' }}>{finalName}</strong> · <strong style={{ color: 'var(--accent)', fontFamily: 'Syne' }}>₹{finalTotal}</strong>

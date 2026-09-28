@@ -17,9 +17,19 @@ const ORDER_STATUSES = {
   cancelled:     { label: 'Cancelled',             color: 'var(--danger)',  dim: 'var(--danger-dim)',  Icon: XCircle,     hint: 'This order was cancelled.' },
 }
 const TEST_STATUS = { label: 'Test payment', color: 'var(--accent)', dim: 'var(--accent-dim)', Icon: CheckCircle, hint: 'Test transaction only. No real charge or stock deduction.' }
+const RAZORPAY_AWAITING_STATUS = { label: 'Paid · awaiting acceptance', color: 'var(--success)', dim: 'var(--success-dim)', Icon: Clock, hint: 'Payment confirmed and stock updated. The shop will accept your order shortly.' }
+const RAZORPAY_REVIEW_STATUS = { label: 'Paid · shop review', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock, hint: 'Payment received. The shop will review stock and contact you.' }
+const RAZORPAY_ACCEPTED_STATUS = { label: 'Accepted', color: 'var(--success)', dim: 'var(--success-dim)', Icon: CheckCircle, hint: 'The shop accepted your paid order. See you soon.' }
 
-function StatusBadge({ status, paymentStatus }) {
-  const cfg = paymentStatus === 'test_captured' ? TEST_STATUS : ORDER_STATUSES[status] || ORDER_STATUSES.pending
+function orderStatusConfig(order) {
+  if (order.paymentStatus === 'test_captured') return TEST_STATUS
+  if (order.paymentStatus === 'captured_needs_review') return RAZORPAY_REVIEW_STATUS
+  if (order.paymentStatus === 'captured') return order.acceptedAt ? RAZORPAY_ACCEPTED_STATUS : RAZORPAY_AWAITING_STATUS
+  return ORDER_STATUSES[order.status] || ORDER_STATUSES.pending
+}
+
+function StatusBadge({ order }) {
+  const cfg = orderStatusConfig(order)
   const { Icon } = cfg
   return (
     <span style={{
@@ -34,7 +44,7 @@ function StatusBadge({ status, paymentStatus }) {
 }
 
 function OrderCard({ order }) {
-  const cfg = order.paymentStatus === 'test_captured' ? TEST_STATUS : ORDER_STATUSES[order.status] || ORDER_STATUSES.pending
+  const cfg = orderStatusConfig(order)
   const MethodIcon = order.paymentMethod === 'cash' ? Banknote : QrCode
   const [cancelling, setCancelling] = useState(false)
   const canCancel = ACTIVE_ORDER_STATUSES.includes(order.status) && !order.paymentId
@@ -63,7 +73,7 @@ function OrderCard({ order }) {
           <MethodIcon size={12} />
           {order.paymentStatus === 'test_captured' ? 'Razorpay test' : order.paymentMethod === 'cash' ? 'Cash on pickup' : 'UPI'}
         </div>
-        <StatusBadge status={order.status} paymentStatus={order.paymentStatus} />
+        <StatusBadge order={order} />
       </div>
 
       <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 6 }}>
@@ -142,7 +152,7 @@ export default function MyOrders({ embedded = false, watchOnly = false }) {
 
   if (!embedded && visibleOrders.length === 0) return null
 
-  const activeCount = visibleOrders.filter(o => o.status !== 'paid' && o.status !== 'cancelled').length
+  const activeCount = visibleOrders.filter(o => o.status !== 'cancelled' && o.paymentStatus !== 'test_captured' && (o.status !== 'paid' || (o.paymentStatus === 'captured' && !o.acceptedAt))).length
 
   if (embedded) return (
     <div className="profile-history-list">

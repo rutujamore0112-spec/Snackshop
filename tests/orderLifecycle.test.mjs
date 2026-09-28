@@ -128,3 +128,35 @@ test('repeated product IDs release their combined quantity', async () => {
   await f.act('cancelled')
   assert.deepEqual(f.read().p, { stock: 10, reserved: 2 })
 })
+
+test('accepting a settled Razorpay order does not deduct stock again', async () => {
+  const f = fixture('paid', [{ productId: 'p', qty: 2 }], { paymentId: 'pay_1', paymentStatus: 'captured', reservationActive: false })
+  await f.act('accept')
+  assert.equal(f.read().order.status, 'paid')
+  assert.ok(f.read().order.acceptedAt)
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 5 })
+  await f.act('accept')
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 5 })
+  await assert.rejects(f.act('delete'), /cannot be cancelled or deleted/)
+})
+
+test('accepting a captured payment needing review deducts stock once', async () => {
+  const f = fixture('utr_submitted', [{ productId: 'p', qty: 2 }], {
+    paymentId: 'pay_1', paymentStatus: 'captured_needs_review', reservationActive: false,
+  })
+  await f.act('accept')
+  assert.equal(f.read().order.status, 'paid')
+  assert.equal(f.read().order.paymentStatus, 'captured')
+  assert.ok(f.read().order.acceptedAt)
+  assert.deepEqual(f.read().p, { stock: 8, reserved: 5 })
+  await f.act('accept')
+  assert.deepEqual(f.read().p, { stock: 8, reserved: 5 })
+})
+
+test('test payments cannot be accepted as real orders', async () => {
+  const f = fixture('utr_submitted', [{ productId: 'p', qty: 2 }], {
+    paymentId: 'pay_test', paymentStatus: 'test_captured', reservationActive: false,
+  })
+  await assert.rejects(f.act('accept'), /Only a captured Razorpay payment/)
+  assert.deepEqual(f.read().p, { stock: 10, reserved: 5 })
+})

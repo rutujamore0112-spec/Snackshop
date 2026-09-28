@@ -24,7 +24,10 @@ const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 // Anything outside this set (paid / cancelled) has already been settled,
 // so there's nothing left to release.
 const ACTIVE_RESERVING_STATUSES = ['pending', 'utr_submitted', 'draft']
-const needsOrderAction = order => ACTIVE_RESERVING_STATUSES.includes(order.status) && order.paymentStatus !== 'test_captured'
+const hasCapturedRazorpayPayment = order => Boolean(order.paymentId) && ['captured', 'captured_needs_review'].includes(order.paymentStatus)
+const needsOrderAction = order => hasCapturedRazorpayPayment(order)
+  ? !order.acceptedAt
+  : ACTIVE_RESERVING_STATUSES.includes(order.status) && order.paymentStatus !== 'test_captured'
 
 export const REQUEST_STATUSES = {
   pending:     { label: 'Pending',     color: 'var(--warning)',  dim: 'var(--warning-dim)',  icon: Clock },
@@ -143,10 +146,11 @@ function groupByMonth(orders) {
   return groups
 }
 
-function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete, onDeleteAll }) {
+function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject, onDelete, onDeleteAll }) {
   const [collapsed, setCollapsed] = useState(false)
   const paidTotal = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
   const pendingCount = orders.filter(needsOrderAction).length
+  const deletableOrders = orders.filter(o => !hasCapturedRazorpayPayment(o))
 
   return (
     <div style={{ marginBottom: 20 }}>
@@ -166,14 +170,14 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14, color: 'var(--accent)' }}>₹{paidTotal} collected</span>
-          <motion.button
+          {deletableOrders.length > 0 && <motion.button
             whileTap={{ scale: 0.9 }}
-            onClick={e => { e.stopPropagation(); onDeleteAll(orders) }}
+            onClick={e => { e.stopPropagation(); onDeleteAll(deletableOrders) }}
             style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '4px 10px', color: 'var(--danger)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
-            title={`Delete all ${label} orders`}
+            title={`Delete ${deletableOrders.length} non-Razorpay orders from ${label}`}
           >
-            <Trash2 size={11} /> Delete all
-          </motion.button>
+            <Trash2 size={11} /> Delete {deletableOrders.length}
+          </motion.button>}
         </div>
       </div>
 
@@ -188,6 +192,8 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
           >
             {orders.map(o => {
               const needsAction = needsOrderAction(o)
+              const capturedRazorpay = hasCapturedRazorpayPayment(o)
+              const awaitingAcceptance = capturedRazorpay && !o.acceptedAt
               const isProcessing = processing[o.id]
               return (
                 <motion.div 
@@ -196,11 +202,16 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  style={{ background: 'var(--surface)', border: `1px solid ${needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
+                  style={{ background: 'var(--surface)', border: `2px solid ${awaitingAcceptance ? 'var(--success)' : needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
                 >
-                  {needsAction && (
+                  {needsAction && !capturedRazorpay && (
                     <div style={{ position: 'absolute', top: -9, left: 14, background: 'var(--accent)', color: 'var(--accent-text)', fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 100, fontFamily: 'Syne' }}>
                       VERIFY PAYMENT
+                    </div>
+                  )}
+                  {awaitingAcceptance && (
+                    <div style={{ background: 'var(--success-dim)', color: 'var(--success)', padding: '12px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 16, fontWeight: 800 }}>
+                      PAYMENT CAPTURED — ACCEPT THIS ORDER
                     </div>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
@@ -218,8 +229,9 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                         </div>
                       )}
                       {o.paymentId && <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>Razorpay payment: {o.paymentId}</div>}
-                      {o.paymentStatus === 'captured_needs_review' && <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>Payment captured. Check stock, then confirm or arrange a refund in Razorpay.</div>}
+                      {o.paymentStatus === 'captured_needs_review' && <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>Payment captured, but stock was unavailable. Restock before accepting or arrange a refund in Razorpay.</div>}
                       {o.paymentStatus === 'test_captured' && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4 }}>Razorpay test payment. No real money or stock movement.</div>}
+                      {capturedRazorpay && o.acceptedAt && <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 4, fontWeight: 700 }}>Order accepted · Stock {o.paymentStatus === 'captured' ? 'deducted' : 'reviewed'}</div>}
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                         {o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}
                       </div>
@@ -227,25 +239,35 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onDelete,
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                       <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 18 }}>₹{o.total}</div>
                       <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 100, background: o.status === 'paid' ? 'var(--success-dim)' : o.status === 'cancelled' ? 'var(--danger-dim)' : o.status === 'utr_submitted' ? 'var(--accent-dim)' : 'var(--warning-dim)', color: o.status === 'paid' ? 'var(--success)' : o.status === 'cancelled' ? 'var(--danger)' : o.status === 'utr_submitted' ? 'var(--accent)' : 'var(--warning)' }}>
-                        {o.paymentStatus === 'test_captured' ? 'test payment' : o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'pending verify' : o.status}
+                        {o.paymentStatus === 'test_captured' ? 'test payment' : awaitingAcceptance ? 'PAID · ACCEPT ORDER' : capturedRazorpay && o.acceptedAt ? 'accepted' : o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'pending verify' : o.status}
                       </span>
                       {o.status === 'cancelled' && o.cancelledBy && (
                         <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>
                           by {o.cancelledBy === 'customer' ? 'customer' : 'you'}
                         </span>
                       )}
-                      <motion.button
+                      {!capturedRazorpay && <motion.button
                         whileTap={{ scale: 0.9 }}
                         onClick={() => onDelete(o.id)}
                         style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '3px 8px', color: 'var(--danger)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}
                         title="Delete this order"
                       >
                         <Trash2 size={10} /> Delete
-                      </motion.button>
+                      </motion.button>}
                     </div>
                   </div>
 
-                  {needsAction && (
+                  {awaitingAcceptance && (
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => onAccept(o)}
+                      disabled={isProcessing}
+                      style={{ width: '100%', marginTop: 14, padding: '16px 20px', background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 10, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 800, fontSize: 17, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                    >
+                      {isProcessing ? 'Accepting...' : 'Accept Order'}
+                    </motion.button>
+                  )}
+                  {needsAction && !capturedRazorpay && (
                     <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
                       <motion.button
                         whileTap={{ scale: 0.98 }}
@@ -450,8 +472,8 @@ export default function AdminPage() {
             if (change.type === 'added' && needsOrderAction(data)) {
               toast(`New order from ${data.customerName}`)
             }
-            if (change.type === 'modified' && needsOrderAction(data) && (data.status === 'utr_submitted' || data.status === 'pending')) {
-              toast(`Payment submitted by ${data.customerName}`)
+            if (change.type === 'modified' && needsOrderAction(data) && (data.status === 'utr_submitted' || data.status === 'pending' || data.status === 'paid')) {
+              toast(hasCapturedRazorpayPayment(data) ? `Razorpay payment captured from ${data.customerName} — accept order` : `Payment submitted by ${data.customerName}`)
             }
           })
         }
@@ -498,8 +520,10 @@ export default function AdminPage() {
   }
 
   const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const pendingPayments = orders.filter(o => o.status === 'utr_submitted' && o.paymentStatus !== 'test_captured').length
+  const pendingPayments = orders.filter(o => o.status === 'utr_submitted' && !o.paymentId).length
+  const awaitingAcceptance = orders.filter(o => hasCapturedRazorpayPayment(o) && !o.acceptedAt).length
   const needsActionCount = orders.filter(needsOrderAction).length
+  const deletableOrders = orders.filter(o => !hasCapturedRazorpayPayment(o))
   const pendingReqs = requests.filter(r => !r.resolved).length
   const monthGroups = groupByMonth(orders)
   const requestMonthGroups = groupByMonth(requests)
@@ -540,7 +564,7 @@ export default function AdminPage() {
   }
 
   const markAsPaid = async (order) => {
-    if (order.paymentStatus === 'test_captured') return
+    if (order.paymentId) return
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
@@ -548,6 +572,18 @@ export default function AdminPage() {
       toast.success(`Confirmed for ${order.customerName} — stock updated`)
     } catch (err) {
       toast.error(`Failed: ${err.message}`)
+    }
+    setProcessing(p => ({ ...p, [order.id]: false }))
+  }
+
+  const acceptRazorpayOrder = async (order) => {
+    if (!hasCapturedRazorpayPayment(order) || order.acceptedAt || processing[order.id]) return
+    setProcessing(p => ({ ...p, [order.id]: true }))
+    try {
+      await updateOrderStatus(order.id, 'accept')
+      toast.success(`Accepted ${order.customerName}'s paid order`)
+    } catch (err) {
+      toast.error(`Could not accept order: ${err.message}`)
     }
     setProcessing(p => ({ ...p, [order.id]: false }))
   }
@@ -572,7 +608,7 @@ export default function AdminPage() {
   // order doc is deleted — once deleted, there's no way to know what
   // to release.
   const deleteOrders = async (selected) => {
-    for (const order of selected) await updateOrderStatus(order.id, 'delete')
+    for (const order of selected.filter(o => !hasCapturedRazorpayPayment(o))) await updateOrderStatus(order.id, 'delete')
   }
 
   const deleteOrder = async (id) => {
@@ -592,12 +628,12 @@ export default function AdminPage() {
   }
 
   const deleteAllOrders = async () => {
-    if (!confirm('DELETE ALL ' + orders.length + ' ORDERS PERMANENTLY? This cannot be undone.')) return
+    if (!confirm('DELETE ' + deletableOrders.length + ' NON-RAZORPAY ORDERS PERMANENTLY? This cannot be undone.')) return
     if (!confirm('Are you absolutely sure? All order history will be lost.')) return
     setDeletingAll(true)
     try {
-      await deleteOrders(orders)
-      toast.success('All orders deleted')
+      await deleteOrders(deletableOrders)
+      toast.success('Selected orders deleted')
     } catch (err) { toast.error('Deletion stopped: ' + err.message) }
     setDeletingAll(false)
   }
@@ -769,6 +805,7 @@ export default function AdminPage() {
           <StatCard label="Paid orders" value={orders.filter(o => o.status === 'paid').length} color="var(--success)" />
           <StatCard label="Revenue" value={`₹${totalRevenue}`} color="var(--accent)" maskable />
           <StatCard label="Awaiting verify" value={pendingPayments} color={pendingPayments > 0 ? 'var(--warning)' : 'var(--text-secondary)'} />
+          <StatCard label="Paid · accept now" value={awaitingAcceptance} color={awaitingAcceptance > 0 ? 'var(--success)' : 'var(--text-secondary)'} />
         </div>
 
         {/* Dynamic Animated Tabs */}
@@ -931,16 +968,16 @@ export default function AdminPage() {
               <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14, background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>No orders yet</div>
             ) : (
               <>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                {deletableOrders.length > 0 && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
                   <motion.button
                     whileTap={{ scale: 0.95 }}
                     onClick={deleteAllOrders}
                     disabled={deletingAll}
                     style={{ padding: '8px 16px', background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.25)', borderRadius: 8, color: 'var(--danger)', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, cursor: deletingAll ? 'not-allowed' : 'pointer', opacity: deletingAll ? 0.6 : 1 }}
                   >
-                    <Trash2 size={13} /> {deletingAll ? 'Deleting...' : `Delete all orders (${orders.length})`}
+                    <Trash2 size={13} /> {deletingAll ? 'Deleting...' : `Delete non-Razorpay orders (${deletableOrders.length})`}
                   </motion.button>
-                </div>
+                </div>}
                 {Object.entries(monthGroups).map(([label, monthOrders]) => (
                   <MonthGroup
                     key={label}
@@ -948,6 +985,7 @@ export default function AdminPage() {
                     orders={monthOrders}
                     processing={processing}
                     onMarkPaid={markAsPaid}
+                    onAccept={acceptRazorpayOrder}
                     onReject={markAsCancelled}
                     onDelete={deleteOrder}
                     onDeleteAll={deleteMonthOrders}

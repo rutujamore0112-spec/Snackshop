@@ -18,10 +18,32 @@ export function isExpiredDraft(order, now = Date.now()) {
 
 // Read the current order inside the transaction so competing actions cannot
 // release a reservation twice or revive an already cancelled order.
-export async function transitionOrder(tx, orderRef, productRef, status, cancelledBy) {
+export async function transitionOrder(tx, orderRef, productRef, status, cancelledBy, acceptedAt = new Date()) {
   const snapshot = await tx.get(orderRef)
   if (!snapshot.exists()) throw new Error('Order no longer exists')
   const order = snapshot.data()
+  const acceptingCapturedPayment = status === 'accept'
+  if (acceptingCapturedPayment) {
+    if (!order.paymentId || !['captured', 'captured_needs_review'].includes(order.paymentStatus)) {
+      throw new Error('Only a captured Razorpay payment can be accepted')
+    }
+    if (order.acceptedAt) return 'accepted'
+    if (order.status === 'paid') {
+      tx.update(orderRef, { acceptedAt })
+      return 'accepted'
+    }
+    if (order.status !== 'utr_submitted' || order.paymentStatus !== 'captured_needs_review') {
+      throw new Error('This captured payment needs manual review')
+    }
+    status = 'paid'
+  }
+  if (order.paymentId && ['captured', 'captured_needs_review'].includes(order.paymentStatus)
+    && ['cancelled', 'delete'].includes(status)) {
+    throw new Error('Captured Razorpay orders cannot be cancelled or deleted')
+  }
+  if (!acceptingCapturedPayment && status === 'paid' && order.paymentId) {
+    throw new Error('Use Accept Order for a captured Razorpay payment')
+  }
   if (order.status === status) return
   if (status === 'expire' && order.status !== 'draft') return 'unchanged'
   const active = ACTIVE_ORDER_STATUSES.includes(order.status)
@@ -97,7 +119,8 @@ export async function transitionOrder(tx, orderRef, productRef, status, cancelle
     status: status === 'expire' ? 'cancelled' : status,
     reservationActive: false,
     ...(status === 'paid' && order.paymentStatus === 'captured_needs_review' ? { paymentStatus: 'captured' } : {}),
+    ...(acceptingCapturedPayment ? { acceptedAt } : {}),
     ...(status === 'expire' ? { cancelledBy: 'timeout' } : cancelledBy ? { cancelledBy } : {}),
   })
-  return status === 'expire' ? 'expired' : status
+  return acceptingCapturedPayment ? 'accepted' : status === 'expire' ? 'expired' : status
 }
