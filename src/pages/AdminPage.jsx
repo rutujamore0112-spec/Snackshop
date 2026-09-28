@@ -226,10 +226,9 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className={`admin-acceptance-card${needsAction ? ' is-action-required' : ''}${o.status === 'cancelled' ? ' is-cancelled' : ''}`}
+                  className={`admin-acceptance-card${needsAction ? ' is-action-required' : ''}`}
                 >
                   {needsAction && <span className="admin-acceptance-ribbon">ACTION REQUIRED</span>}
-                  {o.status === 'cancelled' && <div style={{ background: 'var(--danger-dim)', color: 'var(--danger)', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 14, fontWeight: 800 }}>{cancellationLabel(o)} · {o.cancelledAt?.toDate?.()?.toLocaleString('en-IN') || 'time unavailable'}</div>}
                   <div className="admin-acceptance-main">
                     <div className="admin-acceptance-details">
                       <strong>{o.customerName}</strong>
@@ -246,6 +245,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                       <span className={`admin-acceptance-status ${o.status === 'paid' ? 'is-accepted' : o.status === 'cancelled' ? 'is-cancelled' : 'is-awaiting'}`}>
                         {o.paymentMethod === 'cash' && o.status === 'pending' ? 'Cash · awaiting' : o.status === 'paid' ? 'Accepted' : o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'Pending verify' : o.status}
                       </span>
+                      {o.status === 'cancelled' && <span className="admin-acceptance-cancelled-by">{o.cancelledBy === 'admin' ? 'by admin' : o.cancelledBy === 'timeout' ? 'payment expired' : 'by customer'}</span>}
                       <button className="admin-acceptance-delete" onClick={() => onDelete(o)} title="Delete this order"><Trash2 size={13} /> Delete</button>
                     </div>
                   </div>
