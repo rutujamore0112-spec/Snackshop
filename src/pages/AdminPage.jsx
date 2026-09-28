@@ -198,25 +198,25 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
               const isProcessing = processing[o.id]
               if (capturedRazorpay) return (
                 <motion.div key={o.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
-                  style={{ background: 'var(--surface)', border: `2px solid ${awaitingAcceptance ? 'var(--success)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{o.customerName}</div>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 5 }}>{(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}</div>
+                  className={`admin-acceptance-card${awaitingAcceptance ? ' is-ready' : ''}`}>
+                  {awaitingAcceptance && <span className="admin-acceptance-ribbon">READY TO ACCEPT</span>}
+                  <div className="admin-acceptance-main">
+                    <div className="admin-acceptance-details">
+                      <strong>{o.customerName}</strong>
+                      <span className="admin-acceptance-items">{(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}</span>
+                      <time>{o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</time>
                     </div>
-                    <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 18, whiteSpace: 'nowrap' }}>Paid ₹{o.total}</div>
+                    <div className="admin-acceptance-meta">
+                      <strong>₹{o.total}</strong>
+                      <span className={`admin-acceptance-status ${awaitingAcceptance ? 'is-paid' : 'is-accepted'}`}>{awaitingAcceptance ? 'Paid' : 'Accepted'}</span>
+                      {!awaitingAcceptance && <button className="admin-acceptance-delete" onClick={() => onDelete(o)} title="Remove from admin orders; keep payment record"><Trash2 size={13} /> Delete</button>}
+                    </div>
                   </div>
-                  {awaitingAcceptance ? (
-                    <motion.button whileTap={{ scale: 0.98 }} onClick={() => onAccept(o)} disabled={isProcessing}
-                      style={{ width: '100%', marginTop: 16, padding: '14px 20px', background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 10, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 800, fontSize: 17, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>
-                      {isProcessing ? 'Accepting...' : 'Accept Order'}
+                  {awaitingAcceptance && <div className="admin-acceptance-actions">
+                    <motion.button whileTap={{ scale: 0.98 }} onClick={() => onAccept(o)} disabled={isProcessing} className="admin-acceptance-primary">
+                      {isProcessing ? 'Accepting...' : 'Accept verified order'}
                     </motion.button>
-                  ) : (
-                    <button onClick={() => onDelete(o)} title="Remove from admin orders; keep payment record"
-                      style={{ marginTop: 12, background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '5px 10px', color: 'var(--danger)', fontSize: 11, cursor: 'pointer' }}>
-                      Delete
-                    </button>
-                  )}
+                  </div>}
                 </motion.div>
               )
               return (
@@ -226,71 +226,53 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  style={{ background: 'var(--surface)', border: `2px solid ${o.status === 'cancelled' ? 'var(--danger)' : awaitingAcceptance ? 'var(--success)' : needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
+                  className={`admin-acceptance-card${needsAction ? ' is-action-required' : ''}${o.status === 'cancelled' ? ' is-cancelled' : ''}`}
                 >
+                  {needsAction && <span className="admin-acceptance-ribbon">ACTION REQUIRED</span>}
                   {o.status === 'cancelled' && <div style={{ background: 'var(--danger-dim)', color: 'var(--danger)', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 14, fontWeight: 800 }}>{cancellationLabel(o)} · {o.cancelledAt?.toDate?.()?.toLocaleString('en-IN') || 'time unavailable'}</div>}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{o.customerName}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-hint)', fontFamily: 'monospace', marginBottom: 4 }}>Order ID: {o.id}</div>
-                      
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontStyle: o.status === 'paid' ? 'normal' : 'italic' }}>
-                        {(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}
-                      </div>
-
+                  <div className="admin-acceptance-main">
+                    <div className="admin-acceptance-details">
+                      <strong>{o.customerName}</strong>
+                      <span className="admin-acceptance-items">{(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}</span>
                       {o.utr && (
                         <div style={{ fontSize: 11, background: 'var(--surface2)', borderRadius: 6, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'monospace', color: 'var(--text-secondary)', marginBottom: 4 }}>
                           UTR: <strong style={{ color: 'var(--accent)' }}>{o.utr}</strong>
                         </div>
                       )}
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
-                        {o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}
-                      </div>
+                      <time>{o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</time>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-                      <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 18 }}>₹{o.total}</div>
-                      <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 100, background: o.status === 'paid' ? 'var(--success-dim)' : o.status === 'cancelled' ? 'var(--danger-dim)' : o.status === 'utr_submitted' ? 'var(--accent-dim)' : 'var(--warning-dim)', color: o.status === 'paid' ? 'var(--success)' : o.status === 'cancelled' ? 'var(--danger)' : o.status === 'utr_submitted' ? 'var(--accent)' : 'var(--warning)' }}>
-                        {o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'pending verify' : o.status}
+                    <div className="admin-acceptance-meta">
+                      <strong>₹{o.total}</strong>
+                      <span className={`admin-acceptance-status ${o.status === 'paid' ? 'is-accepted' : o.status === 'cancelled' ? 'is-cancelled' : 'is-awaiting'}`}>
+                        {o.paymentMethod === 'cash' && o.status === 'pending' ? 'Cash · awaiting' : o.status === 'paid' ? 'Accepted' : o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'Pending verify' : o.status}
                       </span>
-                      {o.status === 'cancelled' && o.cancelledBy && (
-                        <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>
-                          by {o.cancelledBy === 'customer' ? 'customer' : 'you'}
-                        </span>
-                      )}
-                      {(!capturedRazorpay || o.acceptedAt) && <motion.button
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => onDelete(o)}
-                        style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '3px 8px', color: 'var(--danger)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}
-                        title={capturedRazorpay ? 'Remove from admin orders; keep payment record' : 'Delete this order'}
-                      >
-                        <Trash2 size={10} /> Delete
-                      </motion.button>}
+                      <button className="admin-acceptance-delete" onClick={() => onDelete(o)} title="Delete this order"><Trash2 size={13} /> Delete</button>
                     </div>
                   </div>
 
-                  {needsAction && !capturedRazorpay && (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                  {needsAction && (
+                    <div className="admin-acceptance-actions">
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => onMarkPaid(o)}
                         disabled={isProcessing || o.status === 'draft'}
-                        style={{ flex: 1, padding: 10, background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 8, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 700, fontSize: 13, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                        className="admin-acceptance-primary"
                       >
                         {isProcessing
                           ? 'Processing...'
                           : o.status === 'draft'
                             ? 'Awaiting payment'
                             : o.paymentMethod === 'cash'
-                            ? 'Confirm cash received — deduct stock'
+                            ? 'Accept cash + deduct stock'
                             : 'Mark as Paid — deduct stock'}
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => onReject(o)}
                         disabled={isProcessing}
-                        style={{ padding: '10px 16px', background: 'var(--danger-dim)', border: 'none', borderRadius: 8, color: 'var(--danger)', fontSize: 13, fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                        className="admin-acceptance-reject"
                       >
-                        Reject
+                        Reject payment
                       </motion.button>
                     </div>
                   )}
