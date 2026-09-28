@@ -359,13 +359,13 @@ export default function CartDrawer({ products, open, onClose }) {
                 <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 16 }}>₹{total}</span>
               </div>
               {razorpayEnabled && (
-                <button onClick={handleRazorpay} disabled={submitting || razorpayReady !== true} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 14, textAlign: 'left', color: 'var(--text)', opacity: razorpayReady === true ? 1 : 0.6, cursor: razorpayReady === true ? 'pointer' : 'not-allowed' }}>
+                <button className="cart-payment-option" onClick={handleRazorpay} disabled={submitting || razorpayReady !== true} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 14, textAlign: 'left', color: 'var(--text)', opacity: razorpayReady === true ? 1 : 0.6, cursor: razorpayReady === true ? 'pointer' : 'not-allowed' }}>
                   <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CreditCard size={18} color="var(--accent)" /></div>
                   <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay with Razorpay</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{razorpayReady === null ? 'Checking availability…' : razorpayReady ? 'Secure online payment' : 'Available after live payment setup'}</div></div>
                   <ArrowRight size={15} color="var(--text-hint)" />
                 </button>
               )}
-              <button onClick={handleChooseCash} disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
+              <button className="cart-payment-option" onClick={handleChooseCash} disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
                 <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Banknote size={18} color="var(--success)" /></div>
                 <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay by Cash</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Pay the admin directly on pickup</div></div>
                 <ArrowRight size={15} color="var(--text-hint)" />
