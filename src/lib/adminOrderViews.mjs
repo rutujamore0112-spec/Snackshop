@@ -1,5 +1,5 @@
 export const isCapturedRazorpayOrder = order =>
-  Boolean(order.paymentId) && ['captured', 'captured_needs_review', 'test_captured'].includes(order.paymentStatus)
+  Boolean(order.paymentId) && ['captured', 'captured_needs_review'].includes(order.paymentStatus)
 
 export function isVisibleAdminOrder(order) {
   if (order.adminArchivedAt) return false

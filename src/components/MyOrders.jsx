@@ -16,8 +16,6 @@ const ORDER_STATUSES = {
   paid:          { label: 'Confirmed',             color: 'var(--success)', dim: 'var(--success-dim)', Icon: CheckCircle, hint: 'Order confirmed! See you soon.' },
   cancelled:     { label: 'Cancelled',             color: 'var(--danger)',  dim: 'var(--danger-dim)',  Icon: XCircle,     hint: 'This order was cancelled.' },
 }
-const TEST_STATUS = { label: 'Test payment', color: 'var(--accent)', dim: 'var(--accent-dim)', Icon: CheckCircle, hint: 'Test transaction only. No real charge or stock deduction.' }
-const TEST_ACCEPTED_STATUS = { label: 'Test order acknowledged', color: 'var(--accent)', dim: 'var(--accent-dim)', Icon: CheckCircle, hint: 'The shop acknowledged this test order. No real charge or stock deduction.' }
 const RAZORPAY_AWAITING_STATUS = { label: 'Paid · awaiting acceptance', color: 'var(--success)', dim: 'var(--success-dim)', Icon: Clock, hint: 'Payment confirmed and stock updated. The shop will accept your order shortly.' }
 const RAZORPAY_REVIEW_STATUS = { label: 'Paid · shop review', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock, hint: 'Payment received. The shop will review stock and contact you.' }
 const RAZORPAY_ACCEPTED_STATUS = { label: 'Accepted', color: 'var(--success)', dim: 'var(--success-dim)', Icon: CheckCircle, hint: 'The shop accepted your paid order. See you soon.' }
@@ -28,7 +26,6 @@ function orderStatusConfig(order) {
     if (order.cancelledBy === 'timeout') return { ...ORDER_STATUSES.cancelled, label: 'Payment expired', hint: 'The payment window expired.' }
     return { ...ORDER_STATUSES.cancelled, label: order.paymentMethod === 'razorpay' || order.razorpayOrderId ? 'Payment cancelled by you' : 'Cancelled by you', hint: 'You cancelled this order.' }
   }
-  if (order.paymentStatus === 'test_captured') return order.acceptedAt ? TEST_ACCEPTED_STATUS : TEST_STATUS
   if (order.paymentStatus === 'captured_needs_review') return RAZORPAY_REVIEW_STATUS
   if (order.paymentStatus === 'captured') return order.acceptedAt ? RAZORPAY_ACCEPTED_STATUS : RAZORPAY_AWAITING_STATUS
   return ORDER_STATUSES[order.status] || ORDER_STATUSES.pending
@@ -159,7 +156,7 @@ export default function MyOrders({ embedded = false, watchOnly = false }) {
 
   if (!embedded && visibleOrders.length === 0) return null
 
-  const activeCount = visibleOrders.filter(o => o.status !== 'cancelled' && o.paymentStatus !== 'test_captured' && (o.status !== 'paid' || (o.paymentStatus === 'captured' && !o.acceptedAt))).length
+  const activeCount = visibleOrders.filter(o => o.status !== 'cancelled' && (o.status !== 'paid' || (o.paymentStatus === 'captured' && !o.acceptedAt))).length
 
   if (embedded) return (
     <div className="profile-history-list">

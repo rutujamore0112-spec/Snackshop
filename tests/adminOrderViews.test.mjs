@@ -7,7 +7,7 @@ test('admin sees Razorpay orders only after a confirmed payment', () => {
   assert.equal(isVisibleAdminOrder(draft), false)
   assert.equal(isVisibleAdminOrder({ ...draft, razorpayOrderId: 'order_1' }), false)
   assert.equal(isVisibleAdminOrder({ ...draft, status: 'paid', paymentId: 'pay_1', paymentStatus: 'captured' }), true)
-  assert.equal(isVisibleAdminOrder({ ...draft, status: 'utr_submitted', paymentId: 'pay_2', paymentStatus: 'test_captured' }), true)
+  assert.equal(isVisibleAdminOrder({ ...draft, status: 'utr_submitted', paymentId: 'pay_2', paymentStatus: 'captured_needs_review' }), true)
   assert.equal(isVisibleAdminOrder({ ...draft, status: 'cancelled' }), true)
   assert.equal(isVisibleAdminOrder({ ...draft, status: 'paid', paymentId: 'pay_1', paymentStatus: 'captured', adminArchivedAt: new Date() }), false)
 })

@@ -85,7 +85,7 @@ service cloud.firestore {
           'customerName', 'userId', 'items', 'total', 'status',
           'paymentMethod', 'createdAt', 'expiresAt',
           'reservationActive', 'cancelledBy', 'cancelledAt',
-          'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
+          'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency', 'razorpayKeyId',
           'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt',
           'adminArchivedAt'
         ])
@@ -109,8 +109,9 @@ service cloud.firestore {
         && (!('razorpayOrderId' in data) || (data.razorpayOrderId is string && data.razorpayOrderId.size() <= 100))
         && (!('razorpayAmount' in data) || (data.razorpayAmount is int && data.razorpayAmount >= 100))
         && (!('razorpayCurrency' in data) || data.razorpayCurrency == 'INR')
+        && (!('razorpayKeyId' in data) || (data.razorpayKeyId is string && data.razorpayKeyId.matches('^rzp_live_[A-Za-z0-9]+$')))
         && (!('paymentId' in data) || (data.paymentId is string && data.paymentId.size() <= 100))
-        && (!('paymentStatus' in data) || data.paymentStatus in ['captured', 'captured_needs_review', 'test_captured'])
+        && (!('paymentStatus' in data) || data.paymentStatus in ['captured', 'captured_needs_review'])
         && (!('paidAt' in data) || data.paidAt is timestamp)
         && (!('acceptedAt' in data) || data.acceptedAt is timestamp)
         && (!('adminArchivedAt' in data) || data.adminArchivedAt is timestamp)
@@ -124,7 +125,7 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
         'customerName', 'userId', 'items', 'total',
         'paymentMethod', 'createdAt', 'expiresAt',
-        'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
+        'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency', 'razorpayKeyId',
         'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt',
         'adminArchivedAt'
       ]);
@@ -237,7 +238,7 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && isValidOrder(request.resource.data)
         && !request.resource.data.keys().hasAny([
-          'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
+          'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency', 'razorpayKeyId',
           'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt',
           'cancelledAt', 'adminArchivedAt'
         ])

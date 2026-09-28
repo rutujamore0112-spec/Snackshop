@@ -4,6 +4,7 @@ import { getApps, initializeApp, cert } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
 import { settleCapturedPayment } from '../../server/settleRazorpay.mjs'
+import { razorpayConfiguration } from '../../server/razorpayConfig.mjs'
 
 function sameSignature(expected, supplied) {
   if (typeof supplied !== 'string' || !/^[a-f0-9]{64}$/i.test(supplied)) return false
@@ -19,8 +20,8 @@ export default async function handler(req, res) {
   if (!/^[A-Za-z0-9]{1,40}$/.test(firestoreOrderId)) return res.status(400).json({ error: 'Invalid order ID' })
   const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1]
   if (!token) return res.status(401).json({ error: 'Sign in before verifying payment' })
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT || !process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-    return res.status(503).json({ error: 'Payment service is not configured' })
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT || !razorpayConfiguration(process.env).liveReady) {
+    return res.status(503).json({ error: 'Razorpay checkout is awaiting live credentials' })
   }
   try {
     const app = getApps()[0] || initializeApp({ credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) })

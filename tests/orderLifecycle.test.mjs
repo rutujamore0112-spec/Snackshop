@@ -152,15 +152,3 @@ test('accepting a captured payment needing review deducts stock once', async () 
   await f.act('accept')
   assert.deepEqual(f.read().p, { stock: 8, reserved: 5 })
 })
-
-test('test payments can be acknowledged without changing stock', async () => {
-  const f = fixture('utr_submitted', [{ productId: 'p', qty: 2 }], {
-    paymentId: 'pay_test', paymentStatus: 'test_captured', reservationActive: false,
-  })
-  await f.act('accept')
-  assert.equal(f.read().order.status, 'utr_submitted')
-  assert.ok(f.read().order.acceptedAt)
-  assert.deepEqual(f.read().p, { stock: 10, reserved: 5 })
-  await f.act('accept')
-  assert.deepEqual(f.read().p, { stock: 10, reserved: 5 })
-})

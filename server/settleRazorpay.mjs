@@ -1,9 +1,10 @@
 import { FieldValue } from 'firebase-admin/firestore'
-import { razorpayKeyMode } from './razorpayConfig.mjs'
+import { razorpayConfiguration } from './razorpayConfig.mjs'
 
 // Called by both the checkout callback and the captured-payment webhook.
 // A captured payment is recorded even if stock can no longer be fulfilled.
 export async function settleCapturedPayment(db, orderRef, payment) {
+  if (!razorpayConfiguration(process.env).liveReady) throw new Error('Razorpay live credentials are not configured')
   return db.runTransaction(async transaction => {
     const snapshot = await transaction.get(orderRef)
     if (!snapshot.exists) throw new Error('Order not found')
@@ -14,25 +15,10 @@ export async function settleCapturedPayment(db, orderRef, payment) {
       throw new Error('Payment does not match the order')
     }
     if (order.paymentId === payment.id && ['paid', 'utr_submitted'].includes(order.status)) {
-      return { status: order.status, review: order.paymentStatus === 'captured_needs_review', test: order.paymentStatus === 'test_captured' }
+      return { status: order.status, review: order.paymentStatus === 'captured_needs_review' }
     }
     if (order.status === 'paid' || (order.paymentId && order.paymentId !== payment.id)) {
       throw new Error('Order already has a different payment')
-    }
-
-    // Test-mode captures prove the integration without consuming real stock.
-    const keyMode = razorpayKeyMode(process.env.RAZORPAY_KEY_ID)
-    if (keyMode === 'unconfigured') throw new Error('Razorpay key ID is not configured')
-    if (keyMode === 'test') {
-      transaction.update(orderRef, {
-        status: 'utr_submitted',
-        paymentId: payment.id,
-        paymentStatus: 'test_captured',
-        paidAt: FieldValue.serverTimestamp(),
-        cancelledBy: FieldValue.delete(),
-        cancelledAt: FieldValue.delete(),
-      })
-      return { status: 'utr_submitted', review: false, test: true }
     }
 
     if (order.status !== 'draft') {

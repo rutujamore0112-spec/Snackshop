@@ -6,7 +6,7 @@ import { db } from '../lib/firebase'
 import { useCart } from '../lib/CartContext'
 import { useAuth } from '../lib/AuthContext'
 import { updateOrderStatus } from '../lib/orders'
-import { razorpayEnabled, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay'
+import { razorpayEnabled, getRazorpayAvailability, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay'
 import CheckoutStatus from './CheckoutStatus'
 
 const TIMER_SECONDS = 120 
@@ -34,12 +34,25 @@ export default function CartDrawer({ products, open, onClose }) {
   const busyRef = useRef(false)
   const paymentReceivedRef = useRef(null)
   const [razorpayResult, setRazorpayResult] = useState(null)
+  const [razorpayReady, setRazorpayReady] = useState(null)
 
   const [finalTotal, setFinalTotal] = useState(0)
   const [finalName, setFinalName] = useState('')
 
   const cartProducts = products.filter(p => items[p.id])
   const total = cartProducts.reduce((s, p) => s + p.price * items[p.id], 0)
+
+  useEffect(() => {
+    if (step !== 'method') return
+    let active = true
+    setRazorpayReady(null)
+    getRazorpayAvailability().then(ready => {
+      if (active) setRazorpayReady(ready)
+    }).catch(() => {
+      if (active) setRazorpayReady(false)
+    })
+    return () => { active = false }
+  }, [step])
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -166,7 +179,7 @@ export default function CartDrawer({ products, open, onClose }) {
       forgetPayment()
       clearCart()
       setStep('done')
-      toast.success(result.test ? 'Test payment verified; no real order was placed' : result.review ? 'Payment received; order needs review' : 'Payment verified')
+      toast.success(result.review ? 'Payment received; order needs review' : 'Payment verified')
     } catch (err) {
       console.error('Razorpay checkout failed:', err)
       if (paymentReceivedRef.current) {
@@ -346,9 +359,9 @@ export default function CartDrawer({ products, open, onClose }) {
                 <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 16 }}>₹{total}</span>
               </div>
               {razorpayEnabled && (
-                <button onClick={handleRazorpay} disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
+                <button onClick={handleRazorpay} disabled={submitting || razorpayReady !== true} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 14, textAlign: 'left', color: 'var(--text)', opacity: razorpayReady === true ? 1 : 0.6, cursor: razorpayReady === true ? 'pointer' : 'not-allowed' }}>
                   <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CreditCard size={18} color="var(--accent)" /></div>
-                  <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay with Razorpay</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Secure online payment</div></div>
+                  <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay with Razorpay</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{razorpayReady === null ? 'Checking availability…' : razorpayReady ? 'Secure online payment' : 'Available after live payment setup'}</div></div>
                   <ArrowRight size={15} color="var(--text-hint)" />
                 </button>
               )}
@@ -384,9 +397,9 @@ export default function CartDrawer({ products, open, onClose }) {
           {step === 'done' && (
             <div style={{ textAlign: 'center', padding: '50px 20px', animation: 'popIn 0.35s ease' }}>
               <CheckCircle size={62} color="var(--success)" style={{ margin: '0 auto 16px', display: 'block' }} />
-              <h3 style={{ fontFamily: 'Syne', fontSize: 22, fontWeight: 800, marginBottom: 10 }}>{razorpayResult?.test ? 'Test payment verified!' : 'Order submitted!'}</h3>
+              <h3 style={{ fontFamily: 'Syne', fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Order submitted!</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 280, margin: '0 auto' }}>
-                {razorpayResult ? (razorpayResult.test ? 'This was a Razorpay test transaction. No real money was charged, and no stock was deducted.' : razorpayResult.review ? 'Your payment was captured. The shop will review stock before accepting your order or arranging a refund.' : 'Your payment was verified and stock was updated. The shop will accept your order shortly.') : 'Rutuja will verify your payment and confirm your order. Stock updates automatically once confirmed.'}
+                {razorpayResult ? (razorpayResult.review ? 'Your payment was captured. The shop will review stock before accepting your order or arranging a refund.' : 'Your payment was verified and stock was updated. The shop will accept your order shortly.') : 'Rutuja will verify your payment and confirm your order. Stock updates automatically once confirmed.'}
               </p>
               <div style={{ background: 'var(--surface2)', borderRadius: 12, padding: '12px 16px', marginTop: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
                 Order by <strong style={{ color: 'var(--text)' }}>{finalName}</strong> · <strong style={{ color: 'var(--accent)', fontFamily: 'Syne' }}>₹{finalTotal}</strong>

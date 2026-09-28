@@ -34,31 +34,33 @@ function fixture({ stock = 4, reserved = 0, status = 'draft', paymentId } = {}) 
 
 const payment = { id: 'pay_1', order_id: 'order_1', amount: 2500, currency: 'INR' }
 
-test('test-mode capture records payment without consuming real inventory', async () => {
-  const previous = process.env.RAZORPAY_KEY_ID
+test('test credentials cannot settle an order', async () => {
+  const previousId = process.env.RAZORPAY_KEY_ID
+  const previousSecret = process.env.RAZORPAY_KEY_SECRET
   process.env.RAZORPAY_KEY_ID = 'rzp_test_example'
+  process.env.RAZORPAY_KEY_SECRET = 'secret'
   try {
-    const { db, orderRef, order, product } = fixture()
-    const result = await settleCapturedPayment(db, orderRef, payment)
-    assert.deepEqual(result, { status: 'utr_submitted', review: false, test: true })
-    assert.equal(order.paymentStatus, 'test_captured')
-    assert.equal(order.paymentId, 'pay_1')
+    const { db, orderRef, product } = fixture()
+    await assert.rejects(settleCapturedPayment(db, orderRef, payment), /live credentials/)
     assert.deepEqual(product, { stock: 4, reserved: 0 })
-    assert.deepEqual(await settleCapturedPayment(db, orderRef, payment), result)
   } finally {
-    if (previous === undefined) delete process.env.RAZORPAY_KEY_ID
-    else process.env.RAZORPAY_KEY_ID = previous
+    if (previousId === undefined) delete process.env.RAZORPAY_KEY_ID
+    else process.env.RAZORPAY_KEY_ID = previousId
+    if (previousSecret === undefined) delete process.env.RAZORPAY_KEY_SECRET
+    else process.env.RAZORPAY_KEY_SECRET = previousSecret
   }
 })
 
 test('captured live payment deducts stock once, or flags insufficient stock for review', async () => {
   const previous = process.env.RAZORPAY_KEY_ID
+  const previousSecret = process.env.RAZORPAY_KEY_SECRET
   process.env.RAZORPAY_KEY_ID = 'rzp_live_example'
+  process.env.RAZORPAY_KEY_SECRET = 'secret'
   try {
     const good = fixture()
     assert.deepEqual(await settleCapturedPayment(good.db, good.orderRef, payment), { status: 'paid', review: false })
     assert.equal(good.product.stock, 2)
-    assert.deepEqual(await settleCapturedPayment(good.db, good.orderRef, payment), { status: 'paid', review: false, test: false })
+    assert.deepEqual(await settleCapturedPayment(good.db, good.orderRef, payment), { status: 'paid', review: false })
     assert.equal(good.product.stock, 2)
 
     const short = fixture({ stock: 1 })
@@ -68,5 +70,7 @@ test('captured live payment deducts stock once, or flags insufficient stock for 
   } finally {
     if (previous === undefined) delete process.env.RAZORPAY_KEY_ID
     else process.env.RAZORPAY_KEY_ID = previous
+    if (previousSecret === undefined) delete process.env.RAZORPAY_KEY_SECRET
+    else process.env.RAZORPAY_KEY_SECRET = previousSecret
   }
 })

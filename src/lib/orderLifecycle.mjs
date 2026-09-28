@@ -24,14 +24,10 @@ export async function transitionOrder(tx, orderRef, productRef, status, cancelle
   const order = snapshot.data()
   const acceptingCapturedPayment = status === 'accept'
   if (acceptingCapturedPayment) {
-    if (!order.paymentId || !['captured', 'captured_needs_review', 'test_captured'].includes(order.paymentStatus)) {
+    if (!order.paymentId || !['captured', 'captured_needs_review'].includes(order.paymentStatus)) {
       throw new Error('Only a captured Razorpay payment can be accepted')
     }
     if (order.acceptedAt) return 'accepted'
-    if (order.paymentStatus === 'test_captured' && order.status === 'utr_submitted') {
-      tx.update(orderRef, { acceptedAt: actionAt })
-      return 'accepted'
-    }
     if (order.status === 'paid') {
       tx.update(orderRef, { acceptedAt: actionAt })
       return 'accepted'

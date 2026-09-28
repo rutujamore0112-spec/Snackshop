@@ -1,5 +1,12 @@
 export const razorpayEnabled = true
 
+export async function getRazorpayAvailability() {
+  const response = await fetch('/api/razorpay/status', { cache: 'no-store' })
+  if (!response.ok) throw new Error('Could not check Razorpay availability')
+  const configuration = await response.json()
+  return configuration.liveReady === true
+}
+
 let checkoutScriptPromise
 
 function loadCheckoutScript() {

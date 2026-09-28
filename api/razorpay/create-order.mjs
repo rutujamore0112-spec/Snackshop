@@ -33,10 +33,7 @@ function getRazorpay() {
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
   const config = razorpayConfiguration(process.env);
 
-  if (!keyId || !keySecret) {
-    throw new Error("Razorpay credentials are not configured");
-  }
-  if (config.mode === 'unconfigured') throw new Error('Razorpay key ID must be a test or live key');
+  if (!config.liveReady) throw new Error('Razorpay live credentials are not configured');
 
   return new Razorpay({
     key_id: keyId,
@@ -63,6 +60,10 @@ export default async function handler(req, res) {
     return res.status(405).json({
       error: "Method not allowed",
     });
+  }
+
+  if (!razorpayConfiguration(process.env).liveReady) {
+    return res.status(503).json({ error: 'Razorpay checkout is awaiting live credentials' });
   }
 
   // Expose each backend wait in the browser's Network panel without customer data.
@@ -126,6 +127,9 @@ export default async function handler(req, res) {
     }
 
     if (order.razorpayOrderId && Number.isSafeInteger(order.razorpayAmount)) {
+      if (order.razorpayKeyId !== process.env.RAZORPAY_KEY_ID) {
+        return res.status(409).json({ error: 'This checkout used older payment credentials. Please start a new order.' });
+      }
       return res.status(200).json({
         keyId: process.env.RAZORPAY_KEY_ID,
         razorpayOrderId: order.razorpayOrderId,
@@ -229,6 +233,7 @@ export default async function handler(req, res) {
         razorpayOrderId: razorpayOrder.id,
         razorpayAmount: amountPaise,
         razorpayCurrency: "INR",
+        razorpayKeyId: process.env.RAZORPAY_KEY_ID,
         expiresAt: Timestamp.fromMillis(expiresAtMillis),
       });
     }));
@@ -259,7 +264,7 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: "Razorpay authentication failed" });
     }
 
-    const configurationError = ["FIREBASE_SERVICE_ACCOUNT is not configured", "Razorpay credentials are not configured", 'Razorpay key ID must be a test or live key'].includes(error.message);
+    const configurationError = ["FIREBASE_SERVICE_ACCOUNT is not configured", "Razorpay live credentials are not configured"].includes(error.message);
     return res.status(configurationError ? 503 : 500).json({
       error: configurationError ? "Payment service is not configured" : "Unable to create Razorpay order",
     });
