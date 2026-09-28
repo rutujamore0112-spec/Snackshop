@@ -155,11 +155,11 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <div 
+      <div className="admin-month-header"
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
         onClick={() => setCollapsed(c => !c)}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="admin-month-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <motion.div animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>
             <ChevronDown size={15} color="var(--text-secondary)" />
           </motion.div>
@@ -169,7 +169,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
             <span style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, padding: '1px 8px', fontSize: 11, fontWeight: 700 }}>{pendingCount} pending</span>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="admin-month-summary" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14, color: 'var(--accent)' }}>₹{paidTotal} collected</span>
           {deletableOrders.length > 0 && <motion.button
             whileTap={{ scale: 0.9 }}
@@ -303,11 +303,11 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <div
+      <div className="admin-month-header"
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
         onClick={() => setCollapsed(c => !c)}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="admin-month-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <motion.div animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>
             <ChevronDown size={15} color="var(--text-secondary)" />
           </motion.div>
@@ -354,7 +354,7 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
                     padding: '14px 16px',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                  <div className="admin-request-card-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, fontSize: 14 }}>{r.customerName}</span>
@@ -364,7 +364,7 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                    <div className="admin-request-card-actions" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                       {nextStatus && (
                         <motion.button
                           whileTap={{ scale: 0.95 }}
@@ -784,6 +784,7 @@ export default function AdminPage() {
               whileTap={{ scale: 0.95 }}
               onClick={toggleShopStatus}
               disabled={togglingShop}
+              aria-label={shopOpen ? 'Close shop for pickup' : 'Open shop for pickup'}
               style={{
                 background: shopOpen ? 'var(--success-dim)' : 'var(--danger-dim)',
                 border: `1px solid ${shopOpen ? 'rgba(46,204,113,0.3)' : 'rgba(255,92,92,0.3)'}`,
@@ -801,6 +802,7 @@ export default function AdminPage() {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.95 }}
               onClick={handleLogout} 
+              aria-label="Log out of admin"
               style={{ background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.2)', borderRadius: 8, padding: '6px 12px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}
             >
               <LogOut size={13} /> <span className="admin-logout-label">Logout</span>
@@ -816,7 +818,6 @@ export default function AdminPage() {
           <StatCard label="Paid orders" value={orders.filter(o => o.status === 'paid').length} color="var(--success)" />
           <StatCard label="Revenue" value={`₹${totalRevenue}`} color="var(--accent)" maskable />
           <StatCard label="Awaiting verify" value={pendingPayments} color={pendingPayments > 0 ? 'var(--warning)' : 'var(--text-secondary)'} />
-          <StatCard label="Paid · accept now" value={awaitingAcceptance} color={awaitingAcceptance > 0 ? 'var(--success)' : 'var(--text-secondary)'} />
         </div>
 
         {/* Dynamic Animated Tabs */}
@@ -867,7 +868,7 @@ export default function AdminPage() {
         {/* ── PRODUCTS TAB ── */}
         {tab === 'products' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+            <div className="admin-products-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
                 <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{filteredProducts.length === products.length ? products.length : `${filteredProducts.length} of ${products.length}`} product{products.length !== 1 ? 's' : ''} in inventory</p>
                 <label className="admin-product-search"><Search size={16} /><input type="search" value={productSearch} onChange={event => setProductSearch(event.target.value)} placeholder="Search products" aria-label="Search products" />{productSearch && <button type="button" onClick={() => setProductSearch('')} aria-label="Clear product search"><X size={15} /></button>}</label>
@@ -893,7 +894,7 @@ export default function AdminPage() {
                   <p style={{ fontFamily: 'Syne', fontWeight: 700, marginBottom: 14, fontSize: 14, color: 'var(--accent)' }}>New product</p>
                   <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                     <ImageUploader currentUrl={newProduct.imageUrl} productId={`new_${Date.now()}`} onUploaded={url => setNewProduct(p => ({ ...p, imageUrl: url }))} />
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, flex: 1, minWidth: 260 }}>
+                    <div className="admin-product-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, flex: 1, minWidth: 260 }}>
                       <input value={newProduct.name} onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))} placeholder="Product name *" />
                       <select value={newProduct.category} onChange={e => setNewProduct(p => ({ ...p, category: e.target.value }))}>
                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -932,7 +933,7 @@ export default function AdminPage() {
                     {editingId === p.id ? (
                       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                         <ImageUploader currentUrl={editData.imageUrl} productId={p.id} onUploaded={url => setEditData(d => ({ ...d, imageUrl: url }))} />
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8, flex: 1 }}>
+                        <div className="admin-product-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8, flex: 1 }}>
                           <input value={editData.name || ''} onChange={e => setEditData(d => ({ ...d, name: e.target.value }))} style={{ fontSize: 13 }} placeholder="Name" />
                           <select value={editData.category || 'chips'} onChange={e => setEditData(d => ({ ...d, category: e.target.value }))}>
                             {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -960,8 +961,8 @@ export default function AdminPage() {
                         </span>
                         <div className="admin-product-actions" style={{ display: 'flex', gap: 6 }}>
                           <button onClick={() => restockProduct(p.id)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>Restock</button>
-                          <button onClick={() => { setEditingId(p.id); setEditData({ ...p }) }} style={{ background: 'var(--surface2)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}><Edit2 size={13} /></button>
-                          <button onClick={() => deleteProduct(p.id)} style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--danger)', display: 'flex', cursor: 'pointer' }}><Trash2 size={13} /></button>
+                          <button onClick={() => { setEditingId(p.id); setEditData({ ...p }) }} aria-label={`Edit ${p.name}`} style={{ background: 'var(--surface2)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}><Edit2 size={13} /></button>
+                          <button onClick={() => deleteProduct(p.id)} aria-label={`Delete ${p.name}`} style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--danger)', display: 'flex', cursor: 'pointer' }}><Trash2 size={13} /></button>
                         </div>
                       </div>
                     )}
