@@ -229,11 +229,6 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                   style={{ background: 'var(--surface)', border: `2px solid ${o.status === 'cancelled' ? 'var(--danger)' : awaitingAcceptance ? 'var(--success)' : needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
                 >
                   {o.status === 'cancelled' && <div style={{ background: 'var(--danger-dim)', color: 'var(--danger)', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 14, fontWeight: 800 }}>{cancellationLabel(o)} · {o.cancelledAt?.toDate?.()?.toLocaleString('en-IN') || 'time unavailable'}</div>}
-                  {needsAction && !capturedRazorpay && (
-                    <div style={{ background: 'var(--warning-dim)', color: 'var(--warning)', padding: '12px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 15, fontWeight: 800 }}>
-                      {o.paymentMethod === 'cash' ? 'VERIFY CASH RECEIVED BEFORE ACCEPTING' : 'VERIFY UPI PAYMENT BEFORE ACCEPTING'}
-                    </div>
-                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{o.customerName}</div>
@@ -248,8 +243,6 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                           UTR: <strong style={{ color: 'var(--accent)' }}>{o.utr}</strong>
                         </div>
                       )}
-                      {o.paymentId && <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>Razorpay payment: {o.paymentId}</div>}
-                      {o.paymentStatus === 'captured_needs_review' && <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>Payment captured, but stock was unavailable. Restock before accepting or arrange a refund in Razorpay.</div>}
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                         {o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}
                       </div>
@@ -275,16 +268,6 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                     </div>
                   </div>
 
-                  {awaitingAcceptance && (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => onAccept(o)}
-                      disabled={isProcessing}
-                      style={{ width: '100%', marginTop: 14, padding: '16px 20px', background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 10, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 800, fontSize: 17, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
-                    >
-                      {isProcessing ? 'Accepting...' : 'Accept Order'}
-                    </motion.button>
-                  )}
                   {needsAction && !capturedRazorpay && (
                     <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
                       <motion.button
