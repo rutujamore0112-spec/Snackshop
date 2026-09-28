@@ -5,7 +5,7 @@ import { collection, doc, serverTimestamp, runTransaction, Timestamp } from 'fir
 import { db } from '../lib/firebase'
 import { useCart } from '../lib/CartContext'
 import { useAuth } from '../lib/AuthContext'
-import { updateOrderStatus } from '../lib/orders'
+import { cancelCustomerOrder } from '../lib/orders'
 import { razorpayEnabled, getRazorpayAvailability, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay'
 import CheckoutStatus from './CheckoutStatus'
 
@@ -79,10 +79,28 @@ export default function CartDrawer({ products, open, onClose }) {
       productId: p.id, name: p.name, qty: items[p.id], price: p.price,
     }))
 
-    const orderRef = doc(collection(db, 'orders'))
     const expiresAtMillis = Date.now() + TIMER_SECONDS * 1000
 
     try {
+      if (paymentMethod === 'cash') {
+        const token = await user.getIdToken()
+        const response = await fetch('/api/orders/create-cash', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            items: orderItems.map(({ productId, qty }) => ({ productId, qty })),
+            expectedTotalPaise: Math.round(total * 100),
+          }),
+        })
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(result.error || 'Could not place cash order')
+        setOrderId(result.id)
+        setFinalTotal(result.total)
+        setFinalName(result.name)
+        return result.id
+      }
+
+      const orderRef = doc(collection(db, 'orders'))
       await runTransaction(db, async (tx) => {
         const productRefs = orderItems.map(it => doc(db, 'products', it.productId))
         const productSnaps = await Promise.all(productRefs.map(ref => tx.get(ref)))
@@ -100,23 +118,16 @@ export default function CartDrawer({ products, open, onClose }) {
           }
         }
 
-        if (paymentMethod === 'cash') {
-          productSnaps.forEach((snap, i) => {
-            const data = snap.data()
-            tx.update(productRefs[i], { reserved: (data.reserved || 0) + orderItems[i].qty })
-          })
-        }
-
         tx.set(orderRef, {
           customerName, 
           userId: user?.uid || profile?.id || null, 
           items: orderItems, 
           total,
-          status: paymentMethod === 'razorpay' ? 'draft' : 'pending',
-          reservationActive: paymentMethod === 'cash',
+          status: 'draft',
+          reservationActive: false,
           paymentMethod, 
           createdAt: serverTimestamp(),
-          ...(paymentMethod === 'razorpay' ? { expiresAt: Timestamp.fromMillis(expiresAtMillis) } : {}),
+          expiresAt: Timestamp.fromMillis(expiresAtMillis),
         })
       })
 
@@ -146,7 +157,7 @@ export default function CartDrawer({ products, open, onClose }) {
   const releaseOrder = async (id) => {
     if (!id) return true
     try {
-      await updateOrderStatus(id, 'cancelled', 'customer')
+      await cancelCustomerOrder(id)
       return true
     } catch (err) {
       console.error('Could not release order:', err)

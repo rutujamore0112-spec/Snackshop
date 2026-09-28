@@ -3,7 +3,7 @@ import { Package, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Banknote,
 import toast from 'react-hot-toast'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { updateOrderStatus } from '../lib/orders'
+import { cancelCustomerOrder } from '../lib/orders'
 import { ACTIVE_ORDER_STATUSES, isExpiredDraft } from '../lib/orderLifecycle.mjs'
 import { useAuth } from '../lib/AuthContext'
 import { customerVisibleOrders } from '../lib/customerHistory.mjs'
@@ -56,7 +56,7 @@ function OrderCard({ order }) {
     if (!confirm('Cancel this order?')) return
     setCancelling(true)
     try {
-      await updateOrderStatus(order.id, 'cancelled', 'customer')
+      await cancelCustomerOrder(order.id)
       toast.success('Order cancelled')
     } catch (err) {
       toast.error(`Could not cancel: ${err.message}`)
@@ -133,7 +133,7 @@ export default function MyOrders({ embedded = false, watchOnly = false }) {
     if (!watchOnly) return undefined
     const expireDrafts = () => {
       orders.filter(order => isExpiredDraft(order)).forEach(order => {
-        updateOrderStatus(order.id, 'expire').catch(err => console.error('Order expiry:', err))
+        cancelCustomerOrder(order.id, 'timeout').catch(err => console.error('Order expiry:', err))
       })
     }
     expireDrafts()
