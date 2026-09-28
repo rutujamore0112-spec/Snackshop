@@ -10,6 +10,17 @@ import { razorpayEnabled, openRazorpayCheckout, verifyRazorpayPayment } from '..
 import CheckoutStatus from './CheckoutStatus'
 
 const TIMER_SECONDS = 120 
+const PENDING_PAYMENT_KEY = 'snackshop:pending-razorpay-verification'
+
+function rememberPayment(uid, orderId, payment) {
+  try {
+    sessionStorage.setItem(PENDING_PAYMENT_KEY, JSON.stringify({ uid, orderId, payment, savedAt: Date.now() }))
+  } catch { /* Verification still works in this session. */ }
+}
+
+function forgetPayment() {
+  try { sessionStorage.removeItem(PENDING_PAYMENT_KEY) } catch { /* Storage may be unavailable. */ }
+}
 
 export default function CartDrawer({ products, open, onClose }) {
   const { items, addToCart, decrementFromCart, removeFromCart, clearCart } = useCart()
@@ -145,9 +156,14 @@ export default function CartDrawer({ products, open, onClose }) {
         firestoreOrderId: id,
         customerName,
         email: user?.email,
-        onPaymentReceived: payment => { paymentReceivedRef.current = payment; setStep('confirming_payment') },
+        onPaymentReceived: payment => {
+          paymentReceivedRef.current = payment
+          rememberPayment(user.uid, id, payment)
+          setStep('confirming_payment')
+        },
       })
       setRazorpayResult(result)
+      forgetPayment()
       clearCart()
       setStep('done')
       toast.success(result.test ? 'Test payment verified; no real order was placed' : result.review ? 'Payment received; order needs review' : 'Payment verified')
@@ -177,6 +193,7 @@ export default function CartDrawer({ products, open, onClose }) {
     try {
       const result = await verifyRazorpayPayment(user, orderId, paymentReceivedRef.current)
       setRazorpayResult(result)
+      forgetPayment()
       clearCart()
       setStep('done')
     } catch (error) {
@@ -187,6 +204,38 @@ export default function CartDrawer({ products, open, onClose }) {
       setSubmitting(false)
     }
   }
+
+  useEffect(() => {
+    if (!user?.uid) return
+    let pending
+    try { pending = JSON.parse(sessionStorage.getItem(PENDING_PAYMENT_KEY) || 'null') } catch { forgetPayment(); return }
+    if (!pending || pending.uid !== user.uid) return
+    if (!pending.orderId || !pending.payment?.razorpay_signature || Date.now() - pending.savedAt > 24 * 60 * 60 * 1000) {
+      forgetPayment()
+      return
+    }
+    let active = true
+    paymentReceivedRef.current = pending.payment
+    setOrderId(pending.orderId)
+    setStep('confirming_payment')
+    busyRef.current = true
+    setSubmitting(true)
+    verifyRazorpayPayment(user, pending.orderId, pending.payment).then(result => {
+      if (!active) return
+      setRazorpayResult(result)
+      forgetPayment()
+      clearCart()
+      setStep('done')
+      toast.success('Your payment was confirmed')
+    }).catch(error => {
+      if (!active) return
+      console.error('Payment recovery failed:', error)
+      setStep('verification_error')
+    }).finally(() => {
+      if (active) { busyRef.current = false; setSubmitting(false) }
+    })
+    return () => { active = false }
+  }, [user?.uid])
 
   const handleCancelOrder = async () => {
     if (busyRef.current || paymentReceivedRef.current) return
@@ -214,6 +263,7 @@ export default function CartDrawer({ products, open, onClose }) {
   const handleClose = async () => {
     if (busyRef.current) return
     if (['creating_payment', 'confirming_payment', 'creating_cash', 'cancelling_payment'].includes(step)) return
+    if (step === 'verification_error') { onClose(); return }
     if (step === 'razorpay' && orderId && !paymentReceivedRef.current && !(await handleCancelOrder())) return
     resetAndClose()
   }
