@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Package, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Banknote, QrCode, X } from 'lucide-react'
+import { Package, Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Banknote, QrCode, CreditCard, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -17,12 +17,18 @@ const ORDER_STATUSES = {
   cancelled:     { label: 'Cancelled',             color: 'var(--danger)',  dim: 'var(--danger-dim)',  Icon: XCircle,     hint: 'This order was cancelled.' },
 }
 const TEST_STATUS = { label: 'Test payment', color: 'var(--accent)', dim: 'var(--accent-dim)', Icon: CheckCircle, hint: 'Test transaction only. No real charge or stock deduction.' }
+const TEST_ACCEPTED_STATUS = { label: 'Test order acknowledged', color: 'var(--accent)', dim: 'var(--accent-dim)', Icon: CheckCircle, hint: 'The shop acknowledged this test order. No real charge or stock deduction.' }
 const RAZORPAY_AWAITING_STATUS = { label: 'Paid · awaiting acceptance', color: 'var(--success)', dim: 'var(--success-dim)', Icon: Clock, hint: 'Payment confirmed and stock updated. The shop will accept your order shortly.' }
 const RAZORPAY_REVIEW_STATUS = { label: 'Paid · shop review', color: 'var(--warning)', dim: 'var(--warning-dim)', Icon: Clock, hint: 'Payment received. The shop will review stock and contact you.' }
 const RAZORPAY_ACCEPTED_STATUS = { label: 'Accepted', color: 'var(--success)', dim: 'var(--success-dim)', Icon: CheckCircle, hint: 'The shop accepted your paid order. See you soon.' }
 
 function orderStatusConfig(order) {
-  if (order.paymentStatus === 'test_captured') return TEST_STATUS
+  if (order.status === 'cancelled') {
+    if (order.cancelledBy === 'admin') return { ...ORDER_STATUSES.cancelled, label: 'Cancelled by shop', hint: 'The shop cancelled this order.' }
+    if (order.cancelledBy === 'timeout') return { ...ORDER_STATUSES.cancelled, label: 'Payment expired', hint: 'The payment window expired.' }
+    return { ...ORDER_STATUSES.cancelled, label: order.paymentMethod === 'razorpay' || order.razorpayOrderId ? 'Payment cancelled by you' : 'Cancelled by you', hint: 'You cancelled this order.' }
+  }
+  if (order.paymentStatus === 'test_captured') return order.acceptedAt ? TEST_ACCEPTED_STATUS : TEST_STATUS
   if (order.paymentStatus === 'captured_needs_review') return RAZORPAY_REVIEW_STATUS
   if (order.paymentStatus === 'captured') return order.acceptedAt ? RAZORPAY_ACCEPTED_STATUS : RAZORPAY_AWAITING_STATUS
   return ORDER_STATUSES[order.status] || ORDER_STATUSES.pending
@@ -45,7 +51,7 @@ function StatusBadge({ order }) {
 
 function OrderCard({ order }) {
   const cfg = orderStatusConfig(order)
-  const MethodIcon = order.paymentMethod === 'cash' ? Banknote : QrCode
+  const MethodIcon = order.paymentMethod === 'cash' ? Banknote : order.paymentMethod === 'razorpay' || order.razorpayOrderId ? CreditCard : QrCode
   const [cancelling, setCancelling] = useState(false)
   const canCancel = ACTIVE_ORDER_STATUSES.includes(order.status) && !order.paymentId
 
@@ -71,7 +77,7 @@ function OrderCard({ order }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
           <MethodIcon size={12} />
-          {order.paymentStatus === 'test_captured' ? 'Razorpay test' : order.paymentMethod === 'cash' ? 'Cash on pickup' : 'UPI'}
+          {order.paymentMethod === 'cash' ? 'Cash on pickup' : order.paymentMethod === 'razorpay' || order.razorpayOrderId ? 'Razorpay' : 'UPI'}
         </div>
         <StatusBadge order={order} />
       </div>
@@ -103,6 +109,7 @@ function OrderCard({ order }) {
           </button>
         )}
       </div>
+      {order.status === 'cancelled' && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 6 }}>Cancelled {order.cancelledAt?.toDate?.()?.toLocaleString('en-IN') || 'time unavailable'}</div>}
     </div>
   )
 }

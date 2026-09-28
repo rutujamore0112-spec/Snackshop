@@ -18,18 +18,22 @@ export function isExpiredDraft(order, now = Date.now()) {
 
 // Read the current order inside the transaction so competing actions cannot
 // release a reservation twice or revive an already cancelled order.
-export async function transitionOrder(tx, orderRef, productRef, status, cancelledBy, acceptedAt = new Date()) {
+export async function transitionOrder(tx, orderRef, productRef, status, cancelledBy, actionAt = new Date()) {
   const snapshot = await tx.get(orderRef)
   if (!snapshot.exists()) throw new Error('Order no longer exists')
   const order = snapshot.data()
   const acceptingCapturedPayment = status === 'accept'
   if (acceptingCapturedPayment) {
-    if (!order.paymentId || !['captured', 'captured_needs_review'].includes(order.paymentStatus)) {
+    if (!order.paymentId || !['captured', 'captured_needs_review', 'test_captured'].includes(order.paymentStatus)) {
       throw new Error('Only a captured Razorpay payment can be accepted')
     }
     if (order.acceptedAt) return 'accepted'
+    if (order.paymentStatus === 'test_captured' && order.status === 'utr_submitted') {
+      tx.update(orderRef, { acceptedAt: actionAt })
+      return 'accepted'
+    }
     if (order.status === 'paid') {
-      tx.update(orderRef, { acceptedAt })
+      tx.update(orderRef, { acceptedAt: actionAt })
       return 'accepted'
     }
     if (order.status !== 'utr_submitted' || order.paymentStatus !== 'captured_needs_review') {
@@ -68,7 +72,7 @@ export async function transitionOrder(tx, orderRef, productRef, status, cancelle
       for (const { ref, qty, snapshot: product } of products) {
         if (product.exists()) tx.update(ref, { reserved: Math.max(0, (product.data().reserved || 0) - qty) })
       }
-      tx.update(orderRef, { status: 'cancelled', cancelledBy: 'timeout', reservationActive: false })
+      tx.update(orderRef, { status: 'cancelled', cancelledBy: 'timeout', cancelledAt: actionAt, reservationActive: false })
       return 'expired'
     }
     if (!holdsReservation) {
@@ -119,8 +123,8 @@ export async function transitionOrder(tx, orderRef, productRef, status, cancelle
     status: status === 'expire' ? 'cancelled' : status,
     reservationActive: false,
     ...(status === 'paid' && order.paymentStatus === 'captured_needs_review' ? { paymentStatus: 'captured' } : {}),
-    ...(acceptingCapturedPayment ? { acceptedAt } : {}),
-    ...(status === 'expire' ? { cancelledBy: 'timeout' } : cancelledBy ? { cancelledBy } : {}),
+    ...(acceptingCapturedPayment ? { acceptedAt: actionAt } : {}),
+    ...(status === 'expire' ? { cancelledBy: 'timeout', cancelledAt: actionAt } : cancelledBy ? { cancelledBy, cancelledAt: actionAt } : {}),
   })
   return acceptingCapturedPayment ? 'accepted' : status === 'expire' ? 'expired' : status
 }

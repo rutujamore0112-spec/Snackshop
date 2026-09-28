@@ -13,6 +13,7 @@ import { db, auth, storage } from '../lib/firebase'
 import Ledger from '../components/Ledger'
 import { updateOrderStatus } from '../lib/orders'
 import { isExpiredDraft } from '../lib/orderLifecycle.mjs'
+import { isCapturedRazorpayOrder, isVisibleAdminOrder, cancellationLabel } from '../lib/adminOrderViews.mjs'
 import ThemeToggle from '../components/ThemeToggle'
 import useThemePreference from '../lib/useThemePreference'
 
@@ -24,10 +25,10 @@ const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
 // Anything outside this set (paid / cancelled) has already been settled,
 // so there's nothing left to release.
 const ACTIVE_RESERVING_STATUSES = ['pending', 'utr_submitted', 'draft']
-const hasCapturedRazorpayPayment = order => Boolean(order.paymentId) && ['captured', 'captured_needs_review'].includes(order.paymentStatus)
-const needsOrderAction = order => hasCapturedRazorpayPayment(order)
+const hasCapturedRazorpayPayment = order => isCapturedRazorpayOrder(order) && order.paymentStatus !== 'test_captured'
+const needsOrderAction = order => isCapturedRazorpayOrder(order)
   ? !order.acceptedAt
-  : ACTIVE_RESERVING_STATUSES.includes(order.status) && order.paymentStatus !== 'test_captured'
+  : order.paymentMethod !== 'razorpay' && ACTIVE_RESERVING_STATUSES.includes(order.status)
 
 export const REQUEST_STATUSES = {
   pending:     { label: 'Pending',     color: 'var(--warning)',  dim: 'var(--warning-dim)',  icon: Clock },
@@ -150,7 +151,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
   const [collapsed, setCollapsed] = useState(false)
   const paidTotal = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
   const pendingCount = orders.filter(needsOrderAction).length
-  const deletableOrders = orders.filter(o => !hasCapturedRazorpayPayment(o))
+  const deletableOrders = orders.filter(o => !isCapturedRazorpayOrder(o))
 
   return (
     <div style={{ marginBottom: 20 }}>
@@ -192,7 +193,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
           >
             {orders.map(o => {
               const needsAction = needsOrderAction(o)
-              const capturedRazorpay = hasCapturedRazorpayPayment(o)
+              const capturedRazorpay = isCapturedRazorpayOrder(o)
               const awaitingAcceptance = capturedRazorpay && !o.acceptedAt
               const isProcessing = processing[o.id]
               return (
@@ -205,13 +206,13 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                   style={{ background: 'var(--surface)', border: `2px solid ${awaitingAcceptance ? 'var(--success)' : needsAction ? 'rgba(135,206,235,0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
                 >
                   {needsAction && !capturedRazorpay && (
-                    <div style={{ position: 'absolute', top: -9, left: 14, background: 'var(--accent)', color: 'var(--accent-text)', fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 100, fontFamily: 'Syne' }}>
-                      VERIFY PAYMENT
+                    <div style={{ background: 'var(--warning-dim)', color: 'var(--warning)', padding: '12px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 15, fontWeight: 800 }}>
+                      {o.paymentMethod === 'cash' ? 'VERIFY CASH RECEIVED BEFORE ACCEPTING' : 'VERIFY UPI PAYMENT BEFORE ACCEPTING'}
                     </div>
                   )}
                   {awaitingAcceptance && (
                     <div style={{ background: 'var(--success-dim)', color: 'var(--success)', padding: '12px 14px', borderRadius: 10, marginBottom: 14, fontFamily: 'Syne', fontSize: 16, fontWeight: 800 }}>
-                      PAYMENT CAPTURED — ACCEPT THIS ORDER
+                      {o.paymentStatus === 'test_captured' ? 'TEST PAYMENT CONFIRMED — ACCEPT TEST ORDER' : 'PAYMENT RECEIVED — ACCEPT THIS ORDER'}
                     </div>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
@@ -231,7 +232,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                       {o.paymentId && <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>Razorpay payment: {o.paymentId}</div>}
                       {o.paymentStatus === 'captured_needs_review' && <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>Payment captured, but stock was unavailable. Restock before accepting or arrange a refund in Razorpay.</div>}
                       {o.paymentStatus === 'test_captured' && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4 }}>Razorpay test payment. No real money or stock movement.</div>}
-                      {capturedRazorpay && o.acceptedAt && <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 4, fontWeight: 700 }}>Order accepted · Stock {o.paymentStatus === 'captured' ? 'deducted' : 'reviewed'}</div>}
+                      {capturedRazorpay && o.acceptedAt && <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 4, fontWeight: 700 }}>{o.paymentStatus === 'test_captured' ? 'Test order acknowledged · No stock deducted' : `Order accepted · Stock ${o.paymentStatus === 'captured' ? 'deducted' : 'reviewed'}`}</div>}
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                         {o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}
                       </div>
@@ -264,7 +265,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                       disabled={isProcessing}
                       style={{ width: '100%', marginTop: 14, padding: '16px 20px', background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 10, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 800, fontSize: 17, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
                     >
-                      {isProcessing ? 'Accepting...' : 'Accept Order'}
+                      {isProcessing ? 'Accepting...' : o.paymentStatus === 'test_captured' ? 'Accept Test Order' : 'Accept Paid Order'}
                     </motion.button>
                   )}
                   {needsAction && !capturedRazorpay && (
@@ -280,7 +281,7 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                           : o.status === 'draft'
                             ? 'Awaiting payment'
                             : o.paymentMethod === 'cash'
-                            ? 'Accept Cash — deduct stock'
+                            ? 'Confirm cash received — deduct stock'
                             : 'Mark as Paid — deduct stock'}
                       </motion.button>
                       <motion.button
@@ -469,11 +470,13 @@ export default function AdminPage() {
         if (!isInitialOrdersLoad.current) {
           snap.docChanges().forEach(change => {
             const data = change.doc.data()
-            if (change.type === 'added' && needsOrderAction(data)) {
+            if (change.type === 'added' && isVisibleAdminOrder(data) && needsOrderAction(data)) {
               toast(`New order from ${data.customerName}`)
             }
-            if (change.type === 'modified' && needsOrderAction(data) && (data.status === 'utr_submitted' || data.status === 'pending' || data.status === 'paid')) {
-              toast(hasCapturedRazorpayPayment(data) ? `Razorpay payment captured from ${data.customerName} — accept order` : `Payment submitted by ${data.customerName}`)
+            if (change.type === 'modified' && data.status === 'cancelled') {
+              toast(cancellationLabel(data))
+            } else if (change.type === 'modified' && isVisibleAdminOrder(data) && needsOrderAction(data) && (data.status === 'utr_submitted' || data.status === 'pending' || data.status === 'paid')) {
+              toast(isCapturedRazorpayOrder(data) ? `Razorpay payment confirmed from ${data.customerName} — accept order` : `Payment submitted by ${data.customerName}`)
             }
           })
         }
@@ -520,12 +523,14 @@ export default function AdminPage() {
   }
 
   const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const pendingPayments = orders.filter(o => o.status === 'utr_submitted' && !o.paymentId).length
-  const awaitingAcceptance = orders.filter(o => hasCapturedRazorpayPayment(o) && !o.acceptedAt).length
-  const needsActionCount = orders.filter(needsOrderAction).length
-  const deletableOrders = orders.filter(o => !hasCapturedRazorpayPayment(o))
+  const visibleOrders = orders.filter(isVisibleAdminOrder)
+  const cancelledOrders = orders.filter(o => o.status === 'cancelled')
+  const pendingPayments = visibleOrders.filter(o => (o.paymentMethod === 'cash' && o.status === 'pending') || (o.status === 'utr_submitted' && !o.paymentId)).length
+  const awaitingAcceptance = visibleOrders.filter(o => isCapturedRazorpayOrder(o) && !o.acceptedAt).length
+  const needsActionCount = visibleOrders.filter(needsOrderAction).length
+  const deletableOrders = visibleOrders.filter(o => !isCapturedRazorpayOrder(o))
   const pendingReqs = requests.filter(r => !r.resolved).length
-  const monthGroups = groupByMonth(orders)
+  const monthGroups = groupByMonth(visibleOrders)
   const requestMonthGroups = groupByMonth(requests)
 
   useEffect(() => {
@@ -577,7 +582,7 @@ export default function AdminPage() {
   }
 
   const acceptRazorpayOrder = async (order) => {
-    if (!hasCapturedRazorpayPayment(order) || order.acceptedAt || processing[order.id]) return
+    if (!isCapturedRazorpayOrder(order) || order.acceptedAt || processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
       await updateOrderStatus(order.id, 'accept')
@@ -608,7 +613,7 @@ export default function AdminPage() {
   // order doc is deleted — once deleted, there's no way to know what
   // to release.
   const deleteOrders = async (selected) => {
-    for (const order of selected.filter(o => !hasCapturedRazorpayPayment(o))) await updateOrderStatus(order.id, 'delete')
+    for (const order of selected.filter(o => !isCapturedRazorpayOrder(o))) await updateOrderStatus(order.id, 'delete')
   }
 
   const deleteOrder = async (id) => {
@@ -732,6 +737,7 @@ export default function AdminPage() {
   const tabs = [
     { id: 'products', label: 'Products', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
+    { id: 'cancelled', label: 'Cancelled', icon: X },
     { id: 'requests', label: 'Requests', icon: MessageSquare },
     { id: 'finance', label: 'Finance', icon: Wallet },
   ]
@@ -843,6 +849,9 @@ export default function AdminPage() {
                 <span className="admin-tab-badge" style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
                   {needsActionCount}
                 </span>
+              )}
+              {t.id === 'cancelled' && cancelledOrders.length > 0 && (
+                <span className="admin-tab-badge" style={{ background: 'var(--danger)', color: 'white', borderRadius: 100, minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, padding: '0 4px' }}>{cancelledOrders.length}</span>
               )}
               {t.id === 'requests' && pendingReqs > 0 && (
                 <span className="admin-tab-badge" style={{ background: 'var(--danger)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
@@ -964,7 +973,7 @@ export default function AdminPage() {
         {/* ── ORDERS TAB ── */}
         {tab === 'orders' && (
           <div>
-            {orders.length === 0 ? (
+            {visibleOrders.length === 0 ? (
               <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14, background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>No orders yet</div>
             ) : (
               <>
@@ -993,6 +1002,21 @@ export default function AdminPage() {
                 ))}
               </>
             )}
+          </div>
+        )}
+
+        {tab === 'cancelled' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {cancelledOrders.length === 0 ? (
+              <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>No cancelled orders</div>
+            ) : cancelledOrders.map(order => (
+              <div key={order.id} style={{ background: 'var(--surface)', border: '2px solid var(--danger)', borderRadius: 'var(--radius)', padding: '16px 18px' }}>
+                <div style={{ background: 'var(--danger-dim)', color: 'var(--danger)', padding: '10px 12px', borderRadius: 8, fontFamily: 'Syne', fontWeight: 800, marginBottom: 12 }}>{cancellationLabel(order)}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontWeight: 700 }}><span>{order.customerName}</span><span>₹{order.total}</span></div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{(order.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}</div>
+                <div style={{ color: 'var(--text-hint)', fontSize: 11, marginTop: 8 }}>Cancelled {order.cancelledAt?.toDate?.()?.toLocaleString('en-IN') || 'time unavailable'} · {order.paymentMethod === 'cash' ? 'Cash' : 'Razorpay'}</div>
+              </div>
+            ))}
           </div>
         )}
 

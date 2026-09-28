@@ -4,7 +4,7 @@ import { settleCapturedPayment } from '../server/settleRazorpay.mjs'
 
 function fixture({ stock = 4, reserved = 0, status = 'draft', paymentId } = {}) {
   const order = {
-    paymentMethod: 'upi', razorpayOrderId: 'order_1', razorpayAmount: 2500,
+    paymentMethod: 'razorpay', razorpayOrderId: 'order_1', razorpayAmount: 2500,
     razorpayCurrency: 'INR', status, reservationActive: false,
     items: [{ productId: 'snack_1', qty: 2 }], ...(paymentId ? { paymentId } : {}),
   }

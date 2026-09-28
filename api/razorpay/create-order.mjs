@@ -106,9 +106,9 @@ export default async function handler(req, res) {
       });
     }
 
-    if (order.paymentMethod !== "upi") {
+    if (!['razorpay', 'upi'].includes(order.paymentMethod)) {
       return res.status(400).json({
-        error: "This is not a UPI order",
+        error: "This is not a Razorpay order",
       });
     }
 

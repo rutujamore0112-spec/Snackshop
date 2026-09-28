@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Trash2, CheckCircle, Copy, ArrowRight, Banknote, QrCode, Clock, XCircle, ShoppingCart, CreditCard } from 'lucide-react'
+import { X, Trash2, CheckCircle, ArrowRight, Banknote, ShoppingCart, CreditCard } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { collection, doc, serverTimestamp, runTransaction, Timestamp } from 'firebase/firestore'
 import { db } from '../lib/firebase'
@@ -8,8 +8,6 @@ import { useAuth } from '../lib/AuthContext'
 import { updateOrderStatus } from '../lib/orders'
 import { razorpayEnabled, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay'
 
-const UPI_ID = 'rutujamore0112-4@okicici'
-const OWNER_NAME = 'Rutuja More'
 const TIMER_SECONDS = 120 
 
 export default function CartDrawer({ products, open, onClose }) {
@@ -28,26 +26,8 @@ export default function CartDrawer({ products, open, onClose }) {
   const [finalTotal, setFinalTotal] = useState(0)
   const [finalName, setFinalName] = useState('')
 
-  const [secondsLeft, setSecondsLeft] = useState(TIMER_SECONDS)
-  const timerRef = useRef(null)
-  const deadlineRef = useRef(null)
-
   const cartProducts = products.filter(p => items[p.id])
   const total = cartProducts.reduce((s, p) => s + p.price * items[p.id], 0)
-
-  useEffect(() => {
-    if (step !== 'qr' && step !== 'razorpay') return
-    setSecondsLeft(Math.max(0, Math.ceil(((deadlineRef.current || Date.now() + TIMER_SECONDS * 1000) - Date.now()) / 1000)))
-    timerRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil(((deadlineRef.current || Date.now()) - Date.now()) / 1000))
-      setSecondsLeft(remaining)
-      if (remaining === 0 && !busyRef.current && !paymentReceivedRef.current) {
-        clearInterval(timerRef.current)
-        handleAutoCancel()
-      }
-    }, 1000)
-    return () => clearInterval(timerRef.current)
-  }, [step, orderId])
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -56,12 +36,6 @@ export default function CartDrawer({ products, open, onClose }) {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [open, step]) 
-
-  const formatTime = (s) => {
-    const m = Math.floor(s / 60)
-    const sec = s % 60
-    return `${m}:${sec.toString().padStart(2, '0')}`
-  }
 
   const handleProceed = () => {
     if (cartProducts.length === 0) { toast.error('Cart is empty'); return }
@@ -113,16 +87,15 @@ export default function CartDrawer({ products, open, onClose }) {
           userId: user?.uid || profile?.id || null, 
           items: orderItems, 
           total,
-          status: paymentMethod === 'upi' ? 'draft' : 'pending', 
+          status: paymentMethod === 'razorpay' ? 'draft' : 'pending',
           reservationActive: paymentMethod === 'cash',
           paymentMethod, 
           createdAt: serverTimestamp(),
-          ...(paymentMethod === 'upi' ? { expiresAt: Timestamp.fromMillis(expiresAtMillis) } : {}),
+          ...(paymentMethod === 'razorpay' ? { expiresAt: Timestamp.fromMillis(expiresAtMillis) } : {}),
         })
       })
 
       setOrderId(orderRef.id)
-      deadlineRef.current = paymentMethod === 'upi' ? expiresAtMillis : null
       setFinalTotal(total)
       setFinalName(customerName)
       return orderRef.id
@@ -136,48 +109,12 @@ export default function CartDrawer({ products, open, onClose }) {
     }
   }
 
-  const handleChooseUPI = async () => {
-    const id = await createOrder('upi')
-    if (id) setStep('qr')
-  }
-
   const handleChooseCash = async () => {
     const id = await createOrder('cash')
     if (id) {
       clearCart()
       setStep('cash_pending')
     }
-  }
-
-  const submitPaidOrder = async (targetOrderId) => {
-    if (!targetOrderId || busyRef.current) return false
-    busyRef.current = true
-    setSubmitting(true)
-    try {
-      const result = await updateOrderStatus(targetOrderId, 'utr_submitted')
-      if (result === 'expired') {
-        setStep('cart')
-        setOrderId(null)
-        deadlineRef.current = null
-        toast.error('Payment window expired — order cancelled')
-        return false
-      }
-      clearInterval(timerRef.current)
-      clearCart()
-      setStep('done')
-      return true
-    } catch (err) {
-      console.error('Failed to submit payment:', err)
-      toast.error('Could not submit payment: ' + err.message)
-      return false
-    } finally {
-      busyRef.current = false
-      setSubmitting(false)
-    }
-  }
-
-  const handleConfirmPaid = async () => {
-    await submitPaidOrder(orderId)
   }
 
   const releaseOrder = async (id) => {
@@ -193,7 +130,7 @@ export default function CartDrawer({ products, open, onClose }) {
   }
 
   const handleRazorpay = async () => {
-    const id = await createOrder('upi')
+    const id = await createOrder('razorpay')
     if (!id) return
 
     setStep('razorpay')
@@ -205,11 +142,9 @@ export default function CartDrawer({ products, open, onClose }) {
         firestoreOrderId: id,
         customerName,
         email: user?.email,
-        onOrderCreated: expiresAtMillis => { deadlineRef.current = expiresAtMillis },
         onPaymentReceived: payment => { paymentReceivedRef.current = payment },
       })
       setRazorpayResult(result)
-      clearInterval(timerRef.current)
       clearCart()
       setStep('done')
       toast.success(result.test ? 'Test payment verified; no real order was placed' : result.review ? 'Payment received; order needs review' : 'Payment verified')
@@ -221,7 +156,6 @@ export default function CartDrawer({ products, open, onClose }) {
       } else {
         await releaseOrder(id)
         setOrderId(null)
-        deadlineRef.current = null
         setStep('method')
         toast.error(err.message || 'Payment was not completed')
       }
@@ -259,33 +193,12 @@ export default function CartDrawer({ products, open, onClose }) {
     toast('Order cancelled')
     setStep('cart')
     setOrderId(null)
-    clearInterval(timerRef.current)
     return true
-  }
-
-  const handleAutoCancel = async () => {
-    if (!orderId || busyRef.current || paymentReceivedRef.current) return
-    busyRef.current = true
-    setCancelling(true)
-    try {
-      await updateOrderStatus(orderId, 'expire')
-      toast('Payment window expired — order cancelled')
-      setStep('cart')
-      setOrderId(null)
-      deadlineRef.current = null
-    } catch (err) {
-      console.error('Could not expire order:', err)
-      toast.error('Could not cancel the expired order. Please retry from My orders.')
-    } finally {
-      busyRef.current = false
-      setCancelling(false)
-    }
   }
 
   const resetAndClose = (keepCart = true) => {
     setStep('cart')
     setOrderId(null)
-    deadlineRef.current = null
     paymentReceivedRef.current = null
     setRazorpayResult(null)
     if (!keepCart) clearCart()
@@ -294,14 +207,11 @@ export default function CartDrawer({ products, open, onClose }) {
 
   const handleClose = async () => {
     if (busyRef.current) return
-    if ((step === 'qr' || step === 'razorpay') && orderId && !paymentReceivedRef.current && !(await handleCancelOrder())) return
+    if (step === 'razorpay' && orderId && !paymentReceivedRef.current && !(await handleCancelOrder())) return
     resetAndClose()
   }
 
-  const copyUPI = () => { navigator.clipboard.writeText(UPI_ID); toast.success('UPI ID copied!') }
-
   if (!open) return null
-  const isUrgent = secondsLeft <= 20
 
   return (
     <>
@@ -318,7 +228,6 @@ export default function CartDrawer({ products, open, onClose }) {
           <h2 style={{ fontFamily: 'Syne', fontSize: 19, fontWeight: 700 }}>
             {step === 'cart' && 'Your Cart'}
             {step === 'method' && 'Choose Payment'}
-            {step === 'qr' && 'Scan & Pay'}
             {step === 'razorpay' && 'Razorpay Checkout'}
             {step === 'verification_error' && 'Payment received'}
             {step === 'cash_pending' && 'Pay by Cash'}
@@ -328,19 +237,6 @@ export default function CartDrawer({ products, open, onClose }) {
             <X size={17} />
           </button>
         </div>
-
-        {/* Countdown timer bar */}
-        {step === 'qr' && (
-          <div style={{ padding: '9px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', flexShrink: 0, background: isUrgent ? 'var(--danger-dim)' : 'var(--surface2)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: isUrgent ? 'var(--danger)' : 'var(--text-secondary)', animation: isUrgent ? 'pulseRed 1s infinite' : 'none' }}>
-              <Clock size={13} />
-              <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 13 }}>{formatTime(secondsLeft)} left to complete</span>
-            </div>
-            <button onClick={handleCancelOrder} disabled={cancelling || submitting} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: 'var(--danger)', fontSize: 12, fontWeight: 600, padding: 0 }}>
-              <XCircle size={13} /> {cancelling ? 'Cancelling…' : 'Cancel'}
-            </button>
-          </div>
-        )}
 
         {/* Content */}
         <div className="custom-scrollbar cart-drawer-content" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', WebkitOverflowScrolling: 'touch' }}>
@@ -389,15 +285,10 @@ export default function CartDrawer({ products, open, onClose }) {
                 <span style={{ width: 1, height: 14, background: 'var(--border)' }} />
                 <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 16 }}>₹{total}</span>
               </div>
-              <button onClick={handleChooseUPI} disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><QrCode size={18} color="var(--accent)" /></div>
-                <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay by UPI</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Scan QR, instant confirmation</div></div>
-                <ArrowRight size={15} color="var(--text-hint)" />
-              </button>
               {razorpayEnabled && (
                 <button onClick={handleRazorpay} disabled={submitting} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 14, textAlign: 'left', color: 'var(--text)' }}>
                   <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CreditCard size={18} color="var(--accent)" /></div>
-                  <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Razorpay test checkout</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Test payment; no real charge or order</div></div>
+                  <div style={{ flex: 1 }}><div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14 }}>Pay with Razorpay</div><div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Secure online payment</div></div>
                   <ArrowRight size={15} color="var(--text-hint)" />
                 </button>
               )}
@@ -410,36 +301,11 @@ export default function CartDrawer({ products, open, onClose }) {
             </div>
           )}
 
-          {/* QR */}
-          {step === 'qr' && (
-            <div style={{ textAlign: 'center', animation: 'popIn 0.3s ease' }}>
-              <div style={{ display: 'inline-flex', gap: 12, background: 'var(--surface2)', borderRadius: 100, padding: '8px 20px', marginBottom: 18, fontSize: 13, alignItems: 'center' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>{cartProducts.length} item{cartProducts.length > 1 ? 's' : ''}</span>
-                <span style={{ width: 1, height: 14, background: 'var(--border)' }} />
-                <span style={{ fontFamily: 'Syne', fontWeight: 800, color: 'var(--accent)', fontSize: 16 }}>₹{total}</span>
-              </div>
-              <div style={{ background: 'white', borderRadius: 20, padding: '16px 16px 10px', display: 'inline-block', marginBottom: 16 }}>
-                <img className="checkout-qr" src="/qr.jpeg" alt="Rutuja More UPI payment QR" style={{ width: 260, height: 'auto', display: 'block', objectFit: 'contain', borderRadius: 10 }} />
-                <p style={{ fontSize: 12, color: '#555', marginTop: 8, fontWeight: 600 }}>{OWNER_NAME}</p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 22 }}>
-                <code aria-label={`UPI ID ${UPI_ID}`} style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--surface2)', padding: '5px 12px', borderRadius: 8 }}>{UPI_ID}</code>
-                <button onClick={copyUPI} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 8px', color: 'var(--text-secondary)', display: 'flex' }}><Copy size={13} /></button>
-              </div>
-              <ol style={{ textAlign: 'left', paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 2.2 }}>
-                <li>Open GPay / PhonePe / Paytm / any UPI app</li>
-                <li>Scan QR or pay to UPI ID above</li>
-                <li>Pay exactly <strong style={{ color: 'var(--accent)', fontFamily: 'Syne' }}>₹{total}</strong></li>
-                <li>Tap "I've paid" below once done</li>
-              </ol>
-            </div>
-          )}
-
           {/* RAZORPAY */}
           {step === 'razorpay' && (
             <div style={{ textAlign: 'center', padding: '56px 20px', animation: 'popIn 0.3s ease' }}>
               <CreditCard size={54} color="var(--accent)" style={{ margin: '0 auto 18px', display: 'block' }} />
-              <h3 style={{ fontFamily: 'Syne', fontSize: 21, fontWeight: 800, marginBottom: 10 }}>Razorpay test checkout</h3>
+              <h3 style={{ fontFamily: 'Syne', fontSize: 21, fontWeight: 800, marginBottom: 10 }}>Razorpay checkout</h3>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 285, margin: '0 auto' }}>
                 Complete the payment in the Razorpay window.
               </p>
@@ -498,14 +364,6 @@ export default function CartDrawer({ products, open, onClose }) {
           </div>
         )}
 
-        {step === 'qr' && (
-          <div className="cart-drawer-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-            <button onClick={handleConfirmPaid} disabled={submitting || cancelling} style={{ width: '100%', padding: 13, borderRadius: 12, background: 'var(--success-dim)', color: 'var(--success)', border: '1px solid rgba(46,204,113,0.3)', fontFamily: 'Syne', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <CheckCircle size={16} /> I've paid
-            </button>
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 8 }}>Only tap after completing UPI payment</p>
-          </div>
-        )}
       </div>
     </>
   )

@@ -7,7 +7,7 @@ export async function settleCapturedPayment(db, orderRef, payment) {
     const snapshot = await transaction.get(orderRef)
     if (!snapshot.exists) throw new Error('Order not found')
     const order = snapshot.data()
-    if (order.paymentMethod !== 'upi' || order.razorpayOrderId !== payment.order_id
+    if (!['razorpay', 'upi'].includes(order.paymentMethod) || order.razorpayOrderId !== payment.order_id
       || Number(order.razorpayAmount) !== Number(payment.amount)
       || payment.currency !== 'INR' || order.razorpayCurrency !== 'INR') {
       throw new Error('Payment does not match the order')
@@ -27,6 +27,7 @@ export async function settleCapturedPayment(db, orderRef, payment) {
         paymentStatus: 'test_captured',
         paidAt: FieldValue.serverTimestamp(),
         cancelledBy: FieldValue.delete(),
+        cancelledAt: FieldValue.delete(),
       })
       return { status: 'utr_submitted', review: false, test: true }
     }
@@ -39,6 +40,7 @@ export async function settleCapturedPayment(db, orderRef, payment) {
         paymentStatus: 'captured_needs_review',
         paidAt: FieldValue.serverTimestamp(),
         cancelledBy: FieldValue.delete(),
+        cancelledAt: FieldValue.delete(),
       })
       return { status: 'utr_submitted', review: true }
     }

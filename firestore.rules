@@ -84,7 +84,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'customerName', 'userId', 'items', 'total', 'status',
           'paymentMethod', 'createdAt', 'expiresAt',
-          'reservationActive', 'cancelledBy',
+          'reservationActive', 'cancelledBy', 'cancelledAt',
           'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
           'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt'
         ])
@@ -101,7 +101,7 @@ service cloud.firestore {
         && data.total > 0
         && data.total <= 50000
         && data.status in ['draft', 'pending', 'utr_submitted', 'paid', 'cancelled']
-        && data.paymentMethod in ['upi', 'cash']
+        && data.paymentMethod in ['upi', 'cash', 'razorpay']
         && data.createdAt is timestamp
         && (!('expiresAt' in data) || data.expiresAt is timestamp)
         && (!('reservationActive' in data) || data.reservationActive is bool)
@@ -112,6 +112,7 @@ service cloud.firestore {
         && (!('paymentStatus' in data) || data.paymentStatus in ['captured', 'captured_needs_review', 'test_captured'])
         && (!('paidAt' in data) || data.paidAt is timestamp)
         && (!('acceptedAt' in data) || data.acceptedAt is timestamp)
+        && (!('cancelledAt' in data) || data.cancelledAt is timestamp)
         && (!('cancelledBy' in data)
           || (data.cancelledBy is string
             && data.cancelledBy in ['customer', 'admin', 'timeout']));
@@ -235,7 +236,8 @@ service cloud.firestore {
         && isValidOrder(request.resource.data)
         && !request.resource.data.keys().hasAny([
           'razorpayOrderId', 'razorpayAmount', 'razorpayCurrency',
-          'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt'
+          'paymentId', 'paymentStatus', 'paidAt', 'acceptedAt',
+          'cancelledAt'
         ])
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.createdAt == request.time
@@ -246,7 +248,7 @@ service cloud.firestore {
             && request.resource.data.reservationActive == true
             && !('expiresAt' in request.resource.data))
           ||
-          (request.resource.data.paymentMethod == 'upi'
+          (request.resource.data.paymentMethod in ['upi', 'razorpay']
             && request.resource.data.status == 'draft'
             && request.resource.data.reservationActive == false
             && request.resource.data.expiresAt is timestamp
@@ -283,9 +285,10 @@ service cloud.firestore {
         && resource.data.status in ['draft', 'pending', 'utr_submitted']
         && request.resource.data.status == 'cancelled'
         && request.resource.data.cancelledBy == 'customer'
+        && request.resource.data.cancelledAt == request.time
         && request.resource.data.reservationActive == false
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'cancelledBy', 'reservationActive']);
+          .hasOnly(['status', 'cancelledBy', 'cancelledAt', 'reservationActive']);
 
       // Automatic timeout is allowed only after this user's draft deadline.
       allow update: if isOwner(resource.data.userId)
@@ -301,9 +304,10 @@ service cloud.firestore {
         )
         && request.resource.data.status == 'cancelled'
         && request.resource.data.cancelledBy == 'timeout'
+        && request.resource.data.cancelledAt == request.time
         && request.resource.data.reservationActive == false
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'cancelledBy', 'reservationActive']);
+          .hasOnly(['status', 'cancelledBy', 'cancelledAt', 'reservationActive']);
     }
 
     match /requests/{requestId} {
