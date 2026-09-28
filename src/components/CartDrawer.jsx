@@ -7,6 +7,7 @@ import { useCart } from '../lib/CartContext'
 import { useAuth } from '../lib/AuthContext'
 import { updateOrderStatus } from '../lib/orders'
 import { razorpayEnabled, openRazorpayCheckout, verifyRazorpayPayment } from '../lib/razorpay'
+import CheckoutStatus from './CheckoutStatus'
 
 const TIMER_SECONDS = 120 
 
@@ -110,11 +111,12 @@ export default function CartDrawer({ products, open, onClose }) {
   }
 
   const handleChooseCash = async () => {
+    setStep('creating_cash')
     const id = await createOrder('cash')
     if (id) {
       clearCart()
       setStep('cash_pending')
-    }
+    } else setStep('method')
   }
 
   const releaseOrder = async (id) => {
@@ -130,8 +132,9 @@ export default function CartDrawer({ products, open, onClose }) {
   }
 
   const handleRazorpay = async () => {
+    setStep('creating_payment')
     const id = await createOrder('razorpay')
-    if (!id) return
+    if (!id) { setStep('method'); return }
 
     setStep('razorpay')
     busyRef.current = true
@@ -142,7 +145,7 @@ export default function CartDrawer({ products, open, onClose }) {
         firestoreOrderId: id,
         customerName,
         email: user?.email,
-        onPaymentReceived: payment => { paymentReceivedRef.current = payment },
+        onPaymentReceived: payment => { paymentReceivedRef.current = payment; setStep('confirming_payment') },
       })
       setRazorpayResult(result)
       clearCart()
@@ -154,6 +157,7 @@ export default function CartDrawer({ products, open, onClose }) {
         setStep('verification_error')
         toast.error('Payment received. Confirmation is pending; keep your payment ID.')
       } else {
+        setStep('cancelling_payment')
         await releaseOrder(id)
         setOrderId(null)
         setStep('method')
@@ -169,12 +173,14 @@ export default function CartDrawer({ products, open, onClose }) {
     if (!orderId || !paymentReceivedRef.current || busyRef.current) return
     busyRef.current = true
     setSubmitting(true)
+    setStep('confirming_payment')
     try {
       const result = await verifyRazorpayPayment(user, orderId, paymentReceivedRef.current)
       setRazorpayResult(result)
       clearCart()
       setStep('done')
     } catch (error) {
+      setStep('verification_error')
       toast.error(error.message)
     } finally {
       busyRef.current = false
@@ -207,6 +213,7 @@ export default function CartDrawer({ products, open, onClose }) {
 
   const handleClose = async () => {
     if (busyRef.current) return
+    if (['creating_payment', 'confirming_payment', 'creating_cash', 'cancelling_payment'].includes(step)) return
     if (step === 'razorpay' && orderId && !paymentReceivedRef.current && !(await handleCancelOrder())) return
     resetAndClose()
   }
@@ -229,6 +236,8 @@ export default function CartDrawer({ products, open, onClose }) {
             {step === 'cart' && 'Your Cart'}
             {step === 'method' && 'Choose Payment'}
             {step === 'razorpay' && 'Razorpay Checkout'}
+            {['creating_payment', 'confirming_payment', 'cancelling_payment'].includes(step) && 'Razorpay Checkout'}
+            {step === 'creating_cash' && 'Pay by Cash'}
             {step === 'verification_error' && 'Payment received'}
             {step === 'cash_pending' && 'Pay by Cash'}
             {step === 'done' && 'Order Placed!'}
@@ -301,23 +310,8 @@ export default function CartDrawer({ products, open, onClose }) {
             </div>
           )}
 
-          {/* RAZORPAY */}
-          {step === 'razorpay' && (
-            <div style={{ textAlign: 'center', padding: '56px 20px', animation: 'popIn 0.3s ease' }}>
-              <CreditCard size={54} color="var(--accent)" style={{ margin: '0 auto 18px', display: 'block' }} />
-              <h3 style={{ fontFamily: 'Syne', fontSize: 21, fontWeight: 800, marginBottom: 10 }}>Razorpay checkout</h3>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, maxWidth: 285, margin: '0 auto' }}>
-                Complete the payment in the Razorpay window.
-              </p>
-            </div>
-          )}
-
-          {step === 'verification_error' && (
-            <div style={{ textAlign: 'center', padding: '50px 20px' }}>
-              <h3 style={{ marginBottom: 12 }}>Payment received; confirmation pending</h3>
-              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>Do not pay again. Keep payment ID {paymentReceivedRef.current?.razorpay_payment_id} and contact the shop if confirmation does not appear.</p>
-              <button onClick={retryVerification} disabled={submitting} style={{ marginTop: 20, padding: 12, background: 'var(--accent)', borderRadius: 10 }}>{submitting ? 'Checking...' : 'Retry confirmation'}</button>
-            </div>
+          {['creating_payment', 'razorpay', 'confirming_payment', 'creating_cash', 'cancelling_payment', 'verification_error'].includes(step) && (
+            <CheckoutStatus step={step} orderId={orderId} paymentId={paymentReceivedRef.current?.razorpay_payment_id} onRetry={retryVerification} retrying={submitting} />
           )}
 
           {/* CASH PENDING */}

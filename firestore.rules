@@ -173,12 +173,11 @@ service cloud.firestore {
         ) || (
           data.keys().hasAll(['type', 'amount', 'note', 'transactionDate', 'createdAt'])
           && data.keys().hasOnly(['type', 'amount', 'note', 'transactionDate', 'createdAt'])
-          && data.type in ['spent', 'earned', 'self', 'refund']
+          && data.type in ['spent', 'earned', 'self', 'refund', 'procurement', 'cashback']
           && data.amount is number
           && data.amount > 0
           && data.amount <= 100000000
           && data.note is string
-          && data.note.size() > 0
           && data.note.size() <= 500
           && data.transactionDate is string
           && data.transactionDate.size() == 10

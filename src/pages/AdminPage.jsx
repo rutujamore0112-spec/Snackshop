@@ -593,6 +593,23 @@ export default function AdminPage() {
     setProcessing(p => ({ ...p, [order.id]: false }))
   }
 
+  const acceptAllVerifiedOrders = async () => {
+    const pending = visibleOrders.filter(order => isCapturedRazorpayOrder(order) && !order.acceptedAt)
+    if (!pending.length || !confirm(`Accept ${pending.length} verified Razorpay order${pending.length === 1 ? '' : 's'}?`)) return
+    setProcessing(current => ({ ...current, ...Object.fromEntries(pending.map(order => [order.id, true])) }))
+    let accepted = 0
+    for (const order of pending) {
+      try {
+        await updateOrderStatus(order.id, 'accept')
+        accepted += 1
+      } catch (error) {
+        toast.error(`Could not accept ${order.customerName}: ${error.message}`)
+      }
+    }
+    setProcessing(current => ({ ...current, ...Object.fromEntries(pending.map(order => [order.id, false])) }))
+    if (accepted) toast.success(`${accepted} verified order${accepted === 1 ? '' : 's'} accepted`)
+  }
+
   const markAsCancelled = async (order) => {
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
@@ -977,7 +994,13 @@ export default function AdminPage() {
               <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14, background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>No orders yet</div>
             ) : (
               <>
-                {deletableOrders.length > 0 && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                  {awaitingAcceptance > 0 && <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={acceptAllVerifiedOrders}
+                    style={{ padding: '8px 16px', background: 'var(--success)', border: 'none', borderRadius: 8, color: 'white', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+                  ><Check size={13} /> Accept verified ({awaitingAcceptance})</motion.button>}
+                  {deletableOrders.length > 0 &&
                   <motion.button
                     whileTap={{ scale: 0.95 }}
                     onClick={deleteAllOrders}
@@ -985,8 +1008,8 @@ export default function AdminPage() {
                     style={{ padding: '8px 16px', background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.25)', borderRadius: 8, color: 'var(--danger)', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, cursor: deletingAll ? 'not-allowed' : 'pointer', opacity: deletingAll ? 0.6 : 1 }}
                   >
                     <Trash2 size={13} /> {deletingAll ? 'Deleting...' : `Delete non-Razorpay orders (${deletableOrders.length})`}
-                  </motion.button>
-                </div>}
+                  </motion.button>}
+                </div>
                 {Object.entries(monthGroups).map(([label, monthOrders]) => (
                   <MonthGroup
                     key={label}
