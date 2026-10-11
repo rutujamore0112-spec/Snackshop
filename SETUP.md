@@ -6,4 +6,4 @@
 4. Run `npm run dev` for the frontend or `npm run build` to check a production build.
 5. Configure `FIREBASE_SERVICE_ACCOUNT`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in the server hosting environment for payment endpoints. Keep these values out of the repository and frontend environment.
 
-The local Firebase project alias is `snackshop-bfaf4`. The code includes Firestore rules and indexes copied from the source repository. Review their effect on existing data before deploying them to this project. The `/preview` and `/admin-preview` routes run only in development and use sample data.
+The local Firebase project alias is `snackshop-bfaf4`. Its Firestore security rules match the rules already active in that project. Review `firestore.indexes.json` against existing indexes before deploying it. The `/preview` and `/admin-preview` routes run only in development and use sample data.

@@ -58,7 +58,7 @@ Make sure you have [Node.js](https://nodejs.org/) installed on your machine.
    ```
    Firebase client configuration is read in `src/lib/firebase.js`. Razorpay checkout also requires the server endpoints in `api/razorpay` and their server-side environment configuration.
 
-The code was synced from [abhinavmandal68-boop/snackshop](https://github.com/abhinavmandal68-boop/snackshop). This copy uses the `snackshop-bfaf4` Firebase project alias and environment-based client configuration. Set `FIREBASE_SERVICE_ACCOUNT`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in the server hosting environment before using payment endpoints. Review `firestore.rules` and `firestore.indexes.json` against the target project's data before deploying them.
+The code was synced from [abhinavmandal68-boop/snackshop](https://github.com/abhinavmandal68-boop/snackshop). This copy uses the `snackshop-bfaf4` Firebase project alias, its existing Firestore security rules, and environment-based client configuration. Set `FIREBASE_SERVICE_ACCOUNT`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in the server hosting environment before using payment endpoints. Review `firestore.indexes.json` against the target project's data before deploying it.
 
 ### Production Build
 

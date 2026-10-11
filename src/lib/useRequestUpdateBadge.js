@@ -53,7 +53,7 @@ export default function useRequestUpdateBadge(uid) {
     }
     setUnreadCount(0)
     const results = await Promise.allSettled(newlySeenFulfilled.map(request =>
-      updateDoc(doc(db, 'requests', request.id), { customerSeenAt: serverTimestamp() })
+      updateDoc(doc(db, 'requests', request.id), { customerSeenStatus: 'completed', customerSeenAt: serverTimestamp() })
     ))
     const failed = results.find(result => result.status === 'rejected')
     if (failed) console.error('Could not acknowledge fulfilled request:', failed.reason)

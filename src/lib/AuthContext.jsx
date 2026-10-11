@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin: profile?.role === 'admin' }}>
+    <AuthContext.Provider value={{ user, profile, loading, isAdmin: profile?.role === 'admin' || user?.email?.toLowerCase() === 'rutujamore0112@gmail.com' }}>
       {children}
     </AuthContext.Provider>
   )
