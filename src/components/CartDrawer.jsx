@@ -179,7 +179,7 @@ export default function CartDrawer({ products, shopOpen = true, open, onClose })
         },
 
         theme: {
-          color: '#fc6c26',
+          color: '#1546d9',
         },
 
         handler: async (paymentResponse) => {

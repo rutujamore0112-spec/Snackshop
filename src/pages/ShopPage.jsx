@@ -114,7 +114,7 @@ export function ShopView({ products, loading = false, error, displayName = 'frie
       {preview && <div className="preview-banner">LOCAL DESIGN PREVIEW <span>Sample products · no real orders or payments</span><a href="/admin-preview">View admin ↗</a><a href="/login">View login ↗</a></div>}
       <header className="store-header">
         <div className="shop-header-inner">
-          <a className="store-brand" href={preview ? '/preview' : '/'} aria-label="SnackShop home"><span className="brand-stamp"><img src={appearance?.logoUrl || '/favicon.svg?v=3'} alt="" aria-hidden="true" /></span>snackshop<span className="brand-period">.</span></a>
+          <a className="store-brand" href={preview ? '/preview' : '/'} aria-label="SnackShop home"><span className="brand-stamp"><img src={appearance?.logoUrl || '/favicon.svg?v=4'} alt="" aria-hidden="true" /></span>snackshop<span className="brand-period">.</span></a>
           <div className="shop-header-actions">
             <HeaderSearch query={query} onQueryChange={setQuery} onShowResults={showFirstSearchResult} onRequestProduct={openRequestComposer} resultCount={filtered.length} preview={preview} />
             <ProfileMenu displayName={displayName} theme={theme} onToggleTheme={toggleTheme} onLogout={onLogout} preview={preview} openRequestSignal={profileRequestSignal} requestUpdateCount={preview ? previewRequestUpdateCount : requestUpdateCount} onRequestHistoryOpen={preview ? () => setPreviewRequestUpdateCount(0) : onRequestHistoryOpen}

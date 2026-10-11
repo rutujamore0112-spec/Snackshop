@@ -25,6 +25,11 @@ export default function useThemePreference(temporary = false) {
   const [theme, setTheme] = useState(() => previewTheme || initialTheme())
 
   useEffect(() => {
+    const themeColor = document.querySelector('meta[name="theme-color"]')
+    if (themeColor) themeColor.content = theme === 'dark' ? '#121212' : '#edece6'
+  }, [theme])
+
+  useEffect(() => {
     if (previewTheme || temporary) return
     try { window.localStorage.setItem(STORAGE_KEY, theme) } catch {
       // The theme still works for this session when storage is unavailable.

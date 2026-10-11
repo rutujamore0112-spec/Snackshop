@@ -78,7 +78,7 @@ export default function App() {
             fontFamily: 'DM Sans, sans-serif',
             padding: '10px 18px',
           },
-          success: { iconTheme: { primary: '#466345', secondary: '#fff4d6' } },
+          success: { iconTheme: { primary: '#466345', secondary: '#edece6' } },
         }}
       />
       <AppRoutes />
