@@ -1,20 +1,20 @@
 import { Loader2, ShieldCheck, Clock3 } from 'lucide-react'
 
 const messages = {
-  creating_payment: {
+  payment: {
     title: 'Opening secure payment…',
     description: 'We’re preparing your order and opening Razorpay. This may take a few moments.',
-    hint: 'Complete payment in the Razorpay window when it appears.',
+    hint: 'Complete your payment in the Razorpay window when it appears.',
   },
-  razorpay: {
-    title: 'Waiting for Razorpay…',
-    description: 'Your secure checkout is open. Complete payment in the Razorpay window.',
-    hint: 'Keep this page open until your payment is confirmed.',
+  confirming: {
+    title: 'Confirming your order…',
+    description: 'We’ve received your payment details from Razorpay. We’re verifying your payment and finalising your order.',
+    hint: 'Please keep this page open. Your confirmation will appear automatically.',
   },
-  confirming_payment: {
-    title: 'Confirming your payment…',
-    description: 'Razorpay returned your payment details. We’re verifying them and updating your order.',
-    hint: 'Please keep this page open. Do not pay again.',
+  verification_error: {
+    title: 'Confirmation is still pending',
+    description: 'We couldn’t confirm your payment just yet. Check again to verify the same payment without paying again.',
+    hint: 'If this continues, contact the shop admin with your order reference below. Please don’t pay again.',
   },
   creating_cash: {
     title: 'Placing your order…',
@@ -23,35 +23,30 @@ const messages = {
   },
   cancelling_payment: {
     title: 'Returning to your cart…',
-    description: 'We’re closing the payment and recording the cancellation.',
+    description: 'We’re closing your payment and releasing your reservation.',
     hint: 'Your snacks will stay in your cart.',
-  },
-  verification_error: {
-    title: 'Confirmation is still pending',
-    description: 'We received payment details, but could not confirm the payment yet.',
-    hint: 'Check the same payment again. Do not pay twice.',
   },
 }
 
-export default function CheckoutStatus({ step, orderId, paymentId, onRetry, retrying }) {
+export default function CheckoutStatus({ step, orderId, onRetry }) {
   const message = messages[step]
-  if (!message) return null
-  const pending = step === 'verification_error'
+  const needsRetry = step === 'verification_error'
+  const Icon = needsRetry ? Clock3 : ShieldCheck
+
   return (
     <section className="checkout-status" role="status" aria-live="polite" aria-atomic="true">
       <div className="checkout-status-icon" aria-hidden="true">
-        {!pending && <Loader2 className="checkout-status-spinner" size={88} strokeWidth={1.5} />}
-        {pending ? <Clock3 size={30} /> : <ShieldCheck size={30} />}
+        {!needsRetry && <Loader2 className="checkout-status-spinner" size={88} strokeWidth={1.5} />}
+        <Icon size={30} />
       </div>
       <p className="checkout-status-label">SNACKSHOP CHECKOUT</p>
       <h3>{message.title}</h3>
       <p className="checkout-status-description">{message.description}</p>
       <p className="checkout-status-hint">{message.hint}</p>
-      {pending && (
+      {needsRetry && (
         <>
-          <button className="checkout-status-retry" onClick={onRetry} disabled={retrying}>{retrying ? 'Checking…' : 'Check payment again'}</button>
-          {paymentId && <p className="checkout-status-reference">Payment ID: {paymentId}</p>}
-          {orderId && <p className="checkout-status-reference">Order reference: {orderId}</p>}
+          <button className="checkout-status-retry" onClick={onRetry}>Check payment again</button>
+          <p className="checkout-status-reference">Order reference: {orderId}</p>
         </>
       )}
     </section>

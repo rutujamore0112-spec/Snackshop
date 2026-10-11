@@ -9,9 +9,6 @@ export function CartProvider({ children }) {
     setItems(prev => ({ ...prev, [product.id]: (prev[product.id] || 0) + qty }))
   }, [])
 
-  // Decrease a single item's cart quantity by 1. If it hits 0, the item
-  // is removed from the cart entirely (mirrors removeFromCart's cleanup
-  // so the cart never holds a stale 0-qty entry).
   const decrementFromCart = useCallback((productId) => {
     setItems(prev => {
       const current = prev[productId] || 0

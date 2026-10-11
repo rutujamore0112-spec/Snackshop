@@ -2,37 +2,50 @@ import { useEffect, useState } from 'react'
 
 const STORAGE_KEY = 'snackshop-theme'
 
-function getInitialTheme() {
+const getPreviewTheme = () => {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return null
+  if (!['/preview', '/admin-preview'].includes(window.location.pathname)) return null
+  const theme = new URLSearchParams(window.location.search).get('theme')
+  return theme === 'light' || theme === 'dark' ? theme : null
+}
+
+const initialTheme = () => {
   if (typeof window === 'undefined') return 'light'
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY)
     if (saved === 'light' || saved === 'dark') return saved
   } catch {
-    // The theme still works when browser storage is unavailable.
+    // Storage can be unavailable in privacy-restricted browsers.
   }
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-export default function useThemePreference() {
-  const [theme, setTheme] = useState(getInitialTheme)
+export default function useThemePreference(temporary = false) {
+  const previewTheme = getPreviewTheme()
+  const [theme, setTheme] = useState(() => previewTheme || initialTheme())
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    document.documentElement.style.colorScheme = theme
-    try { window.localStorage.setItem(STORAGE_KEY, theme) } catch {
-      // Keep the in-memory preference for this session.
-    }
+    const themeColor = document.querySelector('meta[name="theme-color"]')
+    if (themeColor) themeColor.content = theme === 'dark' ? '#121212' : '#edece6'
   }, [theme])
 
   useEffect(() => {
+    if (previewTheme || temporary) return
+    try { window.localStorage.setItem(STORAGE_KEY, theme) } catch {
+      // The theme still works for this session when storage is unavailable.
+    }
+  }, [theme, previewTheme, temporary])
+
+  useEffect(() => {
+    if (previewTheme || temporary) return
     const syncTheme = event => {
-      if (event.key === STORAGE_KEY && ['light', 'dark'].includes(event.newValue)) {
+      if (event.key === STORAGE_KEY && (event.newValue === 'light' || event.newValue === 'dark')) {
         setTheme(event.newValue)
       }
     }
     window.addEventListener('storage', syncTheme)
     return () => window.removeEventListener('storage', syncTheme)
-  }, [])
+  }, [previewTheme, temporary])
 
   return {
     theme,

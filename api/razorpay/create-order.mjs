@@ -1,8 +1,9 @@
 import Razorpay from "razorpay";
 import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore, Timestamp } from "firebase-admin/firestore";
-import { razorpayConfiguration } from "../../server/razorpayConfig.mjs";
+import { getFirestore } from "firebase-admin/firestore";
+import { createServerTimer } from '../../server/timing.mjs';
+import { reserveUpiOrder } from '../../server/checkoutOrder.mjs';
 
 function getFirebaseAdmin() {
   if (getApps().length > 0) {
@@ -31,9 +32,10 @@ function getFirebaseAdmin() {
 function getRazorpay() {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  const config = razorpayConfiguration(process.env);
 
-  if (!config.liveReady) throw new Error('Razorpay live credentials are not configured');
+  if (!keyId || !keySecret) {
+    throw new Error("Razorpay credentials are not configured");
+  }
 
   return new Razorpay({
     key_id: keyId,
@@ -41,7 +43,7 @@ function getRazorpay() {
   });
 }
 
-async function getAuthenticatedUid(req) {
+async function getAuthenticatedUser(req) {
   const authHeader = req.headers.authorization || "";
 
   if (!authHeader.startsWith("Bearer ")) {
@@ -52,7 +54,7 @@ async function getAuthenticatedUid(req) {
 
   const decodedToken = await getAuth().verifyIdToken(token);
 
-  return decodedToken.uid;
+  return decodedToken;
 }
 
 export default async function handler(req, res) {
@@ -62,47 +64,34 @@ export default async function handler(req, res) {
     });
   }
 
-  if (!razorpayConfiguration(process.env).liveReady) {
-    return res.status(503).json({ error: 'Razorpay checkout is awaiting live credentials' });
-  }
-
-  // Expose each backend wait in the browser's Network panel without customer data.
-  const timings = [];
-  async function timed(name, operation) {
-    const started = performance.now();
-    try {
-      return await operation();
-    } finally {
-      timings.push(`${name};dur=${(performance.now() - started).toFixed(1)}`);
-      res.setHeader("Server-Timing", timings.join(", "));
-    }
-  }
+  const timed = createServerTimer(res);
 
   try {
     getFirebaseAdmin();
 
-    const authenticatedUid = await timed("auth", () => getAuthenticatedUid(req));
+    const user = await timed("auth", () => getAuthenticatedUser(req));
+    const authenticatedUid = user.uid;
 
     const { firestoreOrderId } = req.body || {};
 
-    if (typeof firestoreOrderId !== "string" || !/^[A-Za-z0-9]{1,40}$/.test(firestoreOrderId)) {
+    if (typeof firestoreOrderId !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(firestoreOrderId)) {
       return res.status(400).json({
-        error: "Invalid firestoreOrderId",
+        error: "Missing firestoreOrderId",
       });
     }
 
     const db = getFirestore();
 
     const orderRef = db.collection("orders").doc(firestoreOrderId);
-    const orderSnap = await timed("order_read", () => orderRef.get());
-
-    if (!orderSnap.exists) {
-      return res.status(404).json({
-        error: "Order not found",
-      });
+    let order;
+    if (req.body.items !== undefined) {
+      order = await timed("order_reserve", () => reserveUpiOrder(db, user, req.body));
+    } else {
+      // Keep support for drafts from clients deployed before combined checkout.
+      const orderSnap = await timed("order_read", () => orderRef.get());
+      if (!orderSnap.exists) return res.status(404).json({ error: "Order not found" });
+      order = orderSnap.data();
     }
-
-    const order = orderSnap.data();
 
     if (order.userId !== authenticatedUid) {
       return res.status(403).json({
@@ -110,32 +99,15 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!['razorpay', 'upi'].includes(order.paymentMethod)) {
+    if (order.paymentMethod !== "upi") {
       return res.status(400).json({
-        error: "This is not a Razorpay order",
+        error: "This is not a UPI order",
       });
     }
 
     if (order.status !== "draft") {
       return res.status(400).json({
         error: `Order cannot be paid from status: ${order.status}`,
-      });
-    }
-
-    if (order.expiresAt?.toMillis?.() <= Date.now()) {
-      return res.status(409).json({ error: "Order has expired" });
-    }
-
-    if (order.razorpayOrderId && Number.isSafeInteger(order.razorpayAmount)) {
-      if (order.razorpayKeyId !== process.env.RAZORPAY_KEY_ID) {
-        return res.status(409).json({ error: 'This checkout used older payment credentials. Please start a new order.' });
-      }
-      return res.status(200).json({
-        keyId: process.env.RAZORPAY_KEY_ID,
-        razorpayOrderId: order.razorpayOrderId,
-        amount: order.razorpayAmount,
-        currency: "INR",
-        expiresAtMillis: order.expiresAt?.toMillis?.(),
       });
     }
 
@@ -157,58 +129,61 @@ export default async function handler(req, res) {
       }
     }
 
-    // Read prices in a single batch instead of one network round trip per item.
-    // Keep server-side price validation; never charge a client-supplied total.
-    const productRefs = order.items.map(item =>
-      db.collection("products").doc(item.productId)
-    );
-    const productSnaps = await timed("products_read", () =>
-      db.getAll(...productRefs, { fieldMask: ["price"] })
-    );
-
-    let amountPaise = 0;
-
-    for (let i = 0; i < order.items.length; i++) {
-      const item = order.items[i];
-      const productSnap = productSnaps[i];
-
-      if (!productSnap.exists) {
-        return res.status(400).json({
-          error: `Product not found: ${item.productId}`,
-        });
-      }
-
-      const product = productSnap.data();
-      const price = Number(product.price);
-
-      if (!Number.isFinite(price) || price <= 0) {
-        return res.status(400).json({
-          error: `Invalid price for product: ${item.productId}`,
-        });
-      }
-
-      const itemPaise = Math.round(price * 100);
-      if (Math.round(Number(item.price) * 100) !== itemPaise) {
-        return res.status(409).json({ error: "Product price changed; please retry checkout" });
-      }
-      amountPaise += itemPaise * item.qty;
-    }
-
-    if (!Number.isSafeInteger(amountPaise) || amountPaise < 100) {
-      return res.status(400).json({
-        error: "Order total must be at least 100 paise",
+    // A retry can reuse the gateway order already saved for this draft.
+    if (order.razorpayOrderId && Number.isInteger(order.razorpayAmount) && order.razorpayAmount > 0) {
+      return res.status(200).json({
+        keyId: process.env.RAZORPAY_KEY_ID, razorpayOrderId: order.razorpayOrderId,
+        amount: order.razorpayAmount, currency: 'INR', name: order.customerName || 'Customer',
       });
     }
 
-    if (amountPaise > 5000000) {
+    // pricingVersion can only be written by the server under existing rules.
+    // New checkout drafts already have validated prices and reserved inventory.
+    let totalRupees = order.pricingVersion === 1 ? Number(order.total) : 0;
+    if (order.pricingVersion !== 1) {
+      const productRefs = order.items.map(item =>
+        db.collection("products").doc(item.productId)
+      );
+      const productSnaps = await timed("products_read", () =>
+        db.getAll(...productRefs, { fieldMask: ["price"] })
+      );
+
+      for (let i = 0; i < order.items.length; i++) {
+        const item = order.items[i];
+        const productSnap = productSnaps[i];
+
+        if (!productSnap.exists) {
+          return res.status(400).json({
+            error: `Product not found: ${item.productId}`,
+          });
+        }
+
+        const product = productSnap.data();
+        const price = Number(product.price);
+
+        if (!Number.isFinite(price) || price <= 0) {
+          return res.status(400).json({
+            error: `Invalid price for product: ${item.productId}`,
+          });
+        }
+
+        totalRupees += price * item.qty;
+      }
+    }
+
+    if (!Number.isFinite(totalRupees) || totalRupees <= 0) {
+      return res.status(400).json({
+        error: "Invalid order total",
+      });
+    }
+
+    if (totalRupees > 50000) {
       return res.status(400).json({
         error: "Order total exceeds the allowed limit",
       });
     }
 
-    if (Math.round(Number(order.total) * 100) !== amountPaise) {
-      return res.status(409).json({ error: "Order total changed; please retry checkout" });
-    }
+    const amountPaise = Math.round(totalRupees * 100);
 
     const razorpay = getRazorpay();
 
@@ -222,20 +197,10 @@ export default async function handler(req, res) {
       },
     }));
 
-    const expiresAtMillis = Date.now() + 15 * 60 * 1000;
-    await timed("order_save", () => db.runTransaction(async transaction => {
-      const current = await transaction.get(orderRef);
-      if (!current.exists || current.data().status !== "draft" || current.data().userId !== authenticatedUid) {
-        throw new Error("Order changed during payment setup");
-      }
-      if (current.data().razorpayOrderId) throw new Error("Razorpay order was already created");
-      transaction.update(orderRef, {
-        razorpayOrderId: razorpayOrder.id,
-        razorpayAmount: amountPaise,
-        razorpayCurrency: "INR",
-        razorpayKeyId: process.env.RAZORPAY_KEY_ID,
-        expiresAt: Timestamp.fromMillis(expiresAtMillis),
-      });
+    await timed("order_save", () => orderRef.update({
+      razorpayOrderId: razorpayOrder.id,
+      razorpayAmount: amountPaise,
+      razorpayCurrency: "INR",
     }));
 
     return res.status(200).json({
@@ -244,7 +209,6 @@ export default async function handler(req, res) {
       amount: amountPaise,
       currency: "INR",
       name: order.customerName || "Customer",
-      expiresAtMillis,
     });
   } catch (error) {
     console.error("Razorpay create-order error:", error);
@@ -260,13 +224,8 @@ export default async function handler(req, res) {
       });
     }
 
-    if (error.statusCode === 401 || error.statusCode === 403) {
-      return res.status(401).json({ error: "Razorpay authentication failed" });
-    }
-
-    const configurationError = ["FIREBASE_SERVICE_ACCOUNT is not configured", "Razorpay live credentials are not configured"].includes(error.message);
-    return res.status(configurationError ? 503 : 500).json({
-      error: configurationError ? "Payment service is not configured" : "Unable to create Razorpay order",
+    return res.status(error.status || 500).json({
+      error: error.status ? error.message : "Unable to create Razorpay order",
     });
   }
 }

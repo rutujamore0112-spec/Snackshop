@@ -1,20 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, ShoppingBag, Trash2, Wallet, X } from 'lucide-react'
-import { AnimatePresence, motion } from 'framer-motion'
-import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore'
 import toast from 'react-hot-toast'
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { AnimatePresence, motion } from 'framer-motion'
 import { db } from '../lib/firebase'
-import { TRANSACTION_TYPES, financeMonth, financeTotals, financeDateBounds } from '../lib/finance.mjs'
+import { shopApi } from '../lib/shopApi'
+import { reportReceipts } from '../lib/monthlyReports.mjs'
+import { press } from '../lib/motion'
+import { collectedAmount, revenueReceipts, loanSummary } from '../lib/orderPayments.mjs'
 
-const TYPES = {
-  procurement: { label: 'Procurement cost', short: 'Procurement' },
-  earned: { label: 'Other income', short: 'Income' },
-  self: { label: 'Self-use', short: 'Self' },
-  refund: { label: 'Supplier refund', short: 'Refund' },
-  cashback: { label: 'Cashback', short: 'Cashback' },
-  spent: { label: 'Stock purchase', short: 'Spent' },
+export const MANUAL_TRANSACTION_TYPES = {
+  procurement: { label: 'Procurement cost', shortLabel: 'Procurement', tone: 'danger' },
+  refund: { label: 'Supplier refund', shortLabel: 'Refund', tone: 'warning' },
+  cashback: { label: 'Cashback', shortLabel: 'Cashback', tone: 'success' },
+  self: { label: 'Self use', shortLabel: 'Self use', tone: 'info' },
 }
+
+export const TRANSACTION_TYPES = {
+  ...MANUAL_TRANSACTION_TYPES,
+  spent: { ...MANUAL_TRANSACTION_TYPES.procurement, label: 'Stock purchase' },
+  earned: { label: 'Other income (legacy)', shortLabel: 'Income', tone: 'success' },
+}
+
 const money = value => `₹${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+const pad = value => String(value).padStart(2, '0')
+
 const asDate = value => {
   if (!value) return new Date(0)
   if (typeof value.toDate === 'function') return value.toDate()
@@ -23,114 +32,286 @@ const asDate = value => {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? new Date(0) : date
 }
-const itemDate = item => asDate(item.transactionDate || item.paidAt || item.createdAt)
 
-function Totals({ entries, orders }) {
-  const values = financeTotals(entries, orders)
-  return <div className="finance-stats">
-    {[['Sales from orders', values.sales, 'var(--success)'], ['Procurement', values.procurement, 'var(--danger)'], ['Supplier refunds', values.refund, 'var(--warning)'], ['Cashback', values.cashback, 'var(--success)'], ['Self use', values.self, 'var(--text-secondary)'], ['Shop profit', values.profit, values.profit >= 0 ? 'var(--accent)' : 'var(--danger)']].map(([label, value, color]) => <div className="finance-stat-box" key={label}><span>{label}</span><strong style={{ color }}>{money(value)}</strong></div>)}
-  </div>
+export const localDateKey = value => {
+  const date = asDate(value)
+  return date.getTime() ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` : ''
 }
 
-function EntryForm({ saving, onSave, onClose }) {
-  const bounds = financeDateBounds()
+export const transactionDateBounds = (now = new Date()) => ({
+  min: `${now.getFullYear() - 1}-01-01`,
+  max: localDateKey(now),
+})
+
+export const isTransactionDateAllowed = (value, now = new Date()) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false
+  const { min, max } = transactionDateBounds(now)
+  return value >= min && value <= max
+}
+
+const entryDate = entry => asDate(entry.transactionDate || entry.paidAt || entry.createdAt)
+const monthKey = entry => localDateKey(entryDate(entry)).slice(0, 7)
+const dateLabel = value => asDate(value).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+
+export function financeMonthOptions(entries, orders, now = new Date()) {
+  const bounds = transactionDateBounds(now)
+  const values = new Set()
+  const cursor = asDate(`${bounds.max.slice(0, 7)}-01`)
+  const minimum = bounds.min.slice(0, 7)
+  while (localDateKey(cursor).slice(0, 7) >= minimum) {
+    values.add(localDateKey(cursor).slice(0, 7))
+    cursor.setMonth(cursor.getMonth() - 1)
+  }
+  entries.forEach(entry => { const value = monthKey(entry); if (value) values.add(value) })
+  revenueReceipts(orders).forEach(order => { const value = monthKey(order); if (value) values.add(value) })
+  return [{ value: 'all', label: 'All time' }, ...[...values].sort().reverse().map(value => ({ value, label: asDate(`${value}-01`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) }))]
+}
+
+export function financeTotals(entries, orders) {
+  const totals = { sales: 0, procurement: 0, spent: 0, earned: 0, self: 0, refund: 0, cashback: 0 }
+
+  orders.forEach(order => {
+    totals.sales += collectedAmount(order)
+  })
+
+  entries.forEach(entry => {
+    if (entry.type === 'procurement' || entry.type === 'spent') {
+      totals.procurement += Number(entry.amount || entry.spent || 0)
+      return
+    }
+    if (entry.type && TRANSACTION_TYPES[entry.type]) {
+      totals[entry.type] += Number(entry.amount || 0)
+      return
+    }
+    totals.procurement += Number(entry.procurement || entry.spent || 0)
+    totals.earned += Number(entry.earned || 0)
+    totals.self += Number(entry.self || 0)
+    totals.refund += Number(entry.refund || 0)
+    totals.cashback += Number(entry.cashback || 0)
+  })
+
+  totals.spent = totals.procurement
+  totals.income = totals.sales + totals.earned
+  totals.recovered = totals.refund + totals.cashback
+  totals.netStockCost = totals.procurement - totals.recovered
+  totals.profit = totals.sales - totals.netStockCost
+  return totals
+}
+
+function StatBox({ label, value, tone }) {
+  return <div className={`finance-stat-box finance-stat-${tone || 'neutral'}`}><div className="finance-stat-label">{label}</div><div className="finance-stat-value">{value}</div></div>
+}
+
+function TypeBadge({ type }) {
+  const meta = TRANSACTION_TYPES[type] || { shortLabel: 'Legacy', tone: 'neutral' }
+  return <span className={`finance-type-badge finance-type-${meta.tone}`}>{meta.shortLabel}</span>
+}
+
+function buildActivity(entries, orders) {
+  const saleDays = new Map()
+  orders.filter(order => order.status === 'paid').forEach(order => {
+    const key = localDateKey(entryDate(order))
+    if (!key) return
+    const current = saleDays.get(key) || { id: `sales-${key}`, kind: 'daily-sales', transactionDate: key, total: 0, orderCount: 0 }
+    current.total += Number(order.total || 0)
+    current.orderCount += order.receiptCount || 1
+    saleDays.set(key, current)
+  })
+  return [...saleDays.values(), ...entries.map(entry => ({ ...entry, kind: 'ledger' }))]
+    .sort((a, b) => entryDate(b) - entryDate(a))
+}
+
+function ActivityRow({ item, onDelete }) {
+  const isSale = item.kind === 'daily-sales'
+  const isLegacy = !isSale && !item.type
+  const meta = isSale ? { label: 'Earned', tone: 'success' } : (TRANSACTION_TYPES[item.type] || { label: 'Ledger entry', tone: 'neutral' })
+  const positive = isSale || item.type === 'refund' || item.type === 'cashback' || item.type === 'earned'
+  const amount = isSale ? Number(item.total || 0) : Number(item.amount || item[item.type] || 0)
+  const title = isSale ? 'Daily sales' : item.note || (isLegacy ? 'Imported ledger entry' : meta.label)
+  const legacyValues = isLegacy
+    ? [['spent', 'Procurement'], ['earned', 'Income'], ['refund', 'Refund'], ['cashback', 'Cashback'], ['self', 'Self use']].filter(([type]) => Number(item[type] || 0) > 0)
+    : []
+
+  return <motion.div layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} className="finance-activity-row">
+    <div className="finance-activity-copy">
+      <div className="finance-activity-heading"><strong>{title}</strong>{isSale ? <span className="finance-type-badge finance-type-success">Earned</span> : <TypeBadge type={item.type} />}</div>
+      <time dateTime={localDateKey(entryDate(item))}>{dateLabel(entryDate(item))}</time>
+    </div>
+    <div className="finance-activity-values">
+      {legacyValues.length ? <div className="finance-legacy-values">{legacyValues.map(([type, label]) => <span key={type}><small>{label}</small><strong>{money(item[type])}</strong></span>)}</div> : <strong className={positive ? 'is-positive' : item.type === 'self' ? 'is-independent' : 'is-negative'}>{positive ? '+' : item.type === 'self' ? '' : '−'}{money(amount)}</strong>}
+      {!isSale && <motion.button whileTap={press} type="button" onClick={() => onDelete(item.id)} aria-label={`Delete ${title}`}>Delete</motion.button>}
+    </div>
+  </motion.div>
+}
+
+function TransactionForm({ saving, onSave, onCancel }) {
+  const bounds = transactionDateBounds()
   const [draft, setDraft] = useState({ type: 'procurement', amount: '', note: '', transactionDate: bounds.max })
+
   const submit = event => {
     event.preventDefault()
     const amount = Number(draft.amount)
     if (!Number.isFinite(amount) || amount <= 0) return toast.error('Enter an amount greater than zero')
-    if (draft.transactionDate < bounds.min || draft.transactionDate > bounds.max) return toast.error('Choose a date from the last year through today')
+    if (!isTransactionDateAllowed(draft.transactionDate)) return toast.error(`Choose a date from ${bounds.min} through today`)
     onSave({ ...draft, amount, note: draft.note.trim() })
   }
-  return <motion.form className="finance-entry-form" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} onSubmit={submit}>
-    <div className="finance-form-heading"><div><span className="eyebrow">NEW TRANSACTION</span><h3>What changed?</h3></div><button type="button" onClick={onClose} aria-label="Close"><X size={17} /></button></div>
+
+  return <motion.form initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="finance-entry-form finance-entry-page" onSubmit={submit}>
+    <div className="finance-entry-form-heading"><h3>New transaction</h3></div>
+    <fieldset className="finance-type-picker">
+      <legend>Transaction type</legend>
+      {Object.entries(MANUAL_TRANSACTION_TYPES).map(([value, type]) => <button key={value} type="button" className={draft.type === value ? `is-active finance-choice-${type.tone}` : ''} onClick={() => setDraft(current => ({ ...current, type: value }))}>{type.label}</button>)}
+    </fieldset>
     <div className="finance-entry-fields">
-      <label>Type<select value={draft.type} onChange={event => setDraft(value => ({ ...value, type: event.target.value }))}>{Object.entries(TRANSACTION_TYPES).filter(([value]) => value !== 'spent' && value !== 'earned').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <label>Amount (₹)<input type="number" min="0.01" step="0.01" value={draft.amount} onChange={event => setDraft(value => ({ ...value, amount: event.target.value }))} autoFocus /></label>
-      <label>Date<input type="date" min={bounds.min} max={bounds.max} value={draft.transactionDate} onChange={event => setDraft(value => ({ ...value, transactionDate: event.target.value }))} /></label>
-      <label className="finance-note-field">Description (optional)<input value={draft.note} maxLength={120} onChange={event => setDraft(value => ({ ...value, note: event.target.value }))} placeholder="e.g. Wholesale chips restock" /></label>
+      <label>Transaction date<input type="date" min={bounds.min} max={bounds.max} value={draft.transactionDate} onChange={event => setDraft(value => ({ ...value, transactionDate: event.target.value }))} required /></label>
+      <label>Amount (₹)<input className="no-spinner" type="number" min="0.01" step="0.01" inputMode="decimal" value={draft.amount} onChange={event => setDraft(value => ({ ...value, amount: event.target.value }))} placeholder="0.00" autoFocus required /></label>
+      <label className="finance-note-field">Description <span>(optional)</span><input value={draft.note} maxLength={120} onChange={event => setDraft(value => ({ ...value, note: event.target.value }))} /></label>
     </div>
-    <div className="finance-entry-actions"><button type="button" onClick={onClose}>Cancel</button><button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save transaction'}</button></div>
+    <div className="finance-entry-actions"><button type="button" onClick={onCancel}>Cancel</button><motion.button whileTap={press} type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save transaction'}</motion.button></div>
   </motion.form>
 }
 
-export default function Ledger({ orders = [] }) {
+function DailyFlow({ entries, orders }) {
+  const [activePoint, setActivePoint] = useState('')
+  const pointMap = new Map()
+  const pointFor = item => {
+    const key = localDateKey(entryDate(item))
+    if (!key) return null
+    if (!pointMap.has(key)) pointMap.set(key, { key, date: asDate(key).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }), earned: 0, procurement: 0 })
+    return pointMap.get(key)
+  }
+  orders.filter(order => order.status === 'paid').forEach(order => { const point = pointFor(order); if (point) point.earned += Number(order.total || 0) })
+  entries.forEach(entry => { if (entry.type === 'procurement' || entry.type === 'spent' || (!entry.type && Number(entry.spent || 0))) { const point = pointFor(entry); if (point) point.procurement += Number(entry.amount || entry.procurement || entry.spent || 0) } })
+  const points = [...pointMap.values()].sort((a, b) => a.key.localeCompare(b.key)).slice(-10)
+  const ceiling = Math.max(1, ...points.flatMap(point => [point.earned, point.procurement]))
+
+  return <section className="finance-panel finance-flow-panel">
+    <div className="finance-panel-heading"><h3>Daily flow</h3><div className="finance-flow-legend"><span className="is-earned">Earned</span><span className="is-cost">Procurement</span></div></div>
+    {points.length ? <div className="finance-flow-chart" aria-label="Daily earned and procurement chart">
+      {points.map(point => <div className={`finance-flow-day ${activePoint === point.key ? 'is-active' : ''}`} key={point.key} tabIndex="0" role="button" aria-expanded={activePoint === point.key} onClick={() => setActivePoint(current => current === point.key ? '' : point.key)} onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          setActivePoint(current => current === point.key ? '' : point.key)
+        }
+      }}>
+        <div className="finance-flow-tooltip"><strong>{point.date}</strong><span>Procurement: {money(point.procurement)}</span><span>Earned: {money(point.earned)}</span></div>
+        <div className="finance-flow-bars"><i className="is-earned" style={{ height: `${Math.max(point.earned ? 8 : 0, (point.earned / ceiling) * 100)}%` }} /><i className="is-cost" style={{ height: `${Math.max(point.procurement ? 8 : 0, (point.procurement / ceiling) * 100)}%` }} /></div>
+        <span>{point.date}</span>
+      </div>)}
+    </div> : <div className="finance-chart-empty">No data</div>}
+  </section>
+}
+
+function TransactionMix({ totals }) {
+  const data = [
+    { label: 'Procurement', value: totals.procurement, color: 'var(--danger)' },
+    { label: 'Refunds', value: totals.refund, color: 'var(--accent)' },
+    { label: 'Cashback', value: totals.cashback, color: 'var(--success)' },
+    { label: 'Self use', value: totals.self, color: 'var(--warning)' },
+  ].filter(item => item.value > 0)
+  const total = data.reduce((sum, item) => sum + item.value, 0)
+  let cursor = 0
+  const stops = data.map(item => {
+    const start = cursor
+    cursor += (item.value / total) * 100
+    return `${item.color} ${start}% ${cursor}%`
+  }).join(', ')
+
+  return <section className="finance-panel finance-mix-panel">
+    <div className="finance-panel-heading"><h3>Transaction mix</h3></div>
+    {data.length ? <div className="finance-mix-content">
+      <div className="finance-donut" style={{ background: `conic-gradient(${stops})` }}><span>{money(total)}</span></div>
+      <div className="finance-mix-list">{data.map(item => <div key={item.label}><span><i style={{ background: item.color }} />{item.label}</span><strong>{money(item.value)}</strong></div>)}</div>
+    </div> : <div className="finance-chart-empty">No data</div>}
+  </section>
+}
+
+function PeriodPicker({ period, options, onChange, count }) {
+  return <div className="finance-period-bar"><span>{count} transaction{count === 1 ? '' : 's'}</span><select value={period} onChange={event => onChange(event.target.value)} aria-label="Finance month">{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>
+}
+
+export default function Ledger({ orders = [], reports, reportsReady = true }) {
   const [entries, setEntries] = useState([])
   const [saving, setSaving] = useState(false)
-  const [showForm, setShowForm] = useState(false)
-  const [filter, setFilter] = useState('all')
-  const [search, setSearch] = useState('')
-  const [period, setPeriod] = useState(financeDateBounds().max.slice(0, 7))
 
-  useEffect(() => onSnapshot(query(collection(db, 'ledger'), orderBy('createdAt', 'desc')), snap => setEntries(snap.docs.map(entry => ({ id: entry.id, ...entry.data() }))), err => console.error('Ledger error:', err)), [])
+  useEffect(() => {
+    const unsub = onSnapshot(query(collection(db, 'ledger'), orderBy('createdAt', 'desc')), snap => setEntries(snap.docs.map(entry => ({ id: entry.id, ...entry.data() }))), err => console.error('Ledger error:', err))
+    return unsub
+  }, [])
 
-  const monthOptions = useMemo(() => [...new Set([financeDateBounds().max.slice(0, 7), ...entries.map(financeMonth), ...orders.map(financeMonth)].filter(Boolean))].sort().reverse(), [entries, orders])
-  const selectedEntries = useMemo(() => period === 'all' ? entries : entries.filter(entry => financeMonth(entry) === period), [entries, period])
-  const selectedOrders = useMemo(() => period === 'all' ? orders : orders.filter(order => financeMonth(order) === period), [orders, period])
-  const activity = useMemo(() => [
-    ...selectedOrders.filter(order => order.status === 'paid').map(order => ({ ...order, kind: 'sale' })),
-    ...selectedEntries.map(entry => ({ ...entry, kind: 'ledger' })),
-  ].sort((a, b) => itemDate(b) - itemDate(a)), [selectedEntries, selectedOrders])
-  const totals = useMemo(() => financeTotals(selectedEntries, selectedOrders), [selectedEntries, selectedOrders])
-  const dailyFlow = useMemo(() => {
-    const days = new Map()
-    const add = (item, field, amount) => {
-      const date = itemDate(item)
-      if (!date.getTime()) return
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-      const day = days.get(key) || { key, sales: 0, procurement: 0 }
-      day[field] += amount
-      days.set(key, day)
-    }
-    selectedOrders.filter(order => order.status === 'paid').forEach(order => add(order, 'sales', Number(order.total || 0)))
-    selectedEntries.filter(entry => ['procurement', 'spent'].includes(entry.type) || (!entry.type && entry.spent)).forEach(entry => add(entry, 'procurement', Number(entry.amount || entry.spent || 0)))
-    return [...days.values()].sort((a, b) => a.key.localeCompare(b.key)).slice(-10)
-  }, [selectedEntries, selectedOrders])
-  const dailyCeiling = Math.max(1, ...dailyFlow.flatMap(day => [day.sales, day.procurement]))
-  const visible = activity.filter(item => {
-    const type = item.kind === 'sale' ? 'sale' : item.type === 'spent' ? 'procurement' : item.type || 'legacy'
-    const haystack = [item.customerName, item.note, ...(item.items || []).map(product => product.name)].filter(Boolean).join(' ').toLowerCase()
-    return (filter === 'all' || filter === type) && haystack.includes(search.trim().toLowerCase())
-  })
-
-  const save = async transaction => {
+  const addEntry = async transaction => {
     setSaving(true)
-    try {
-      await addDoc(collection(db, 'ledger'), { ...transaction, createdAt: serverTimestamp() })
-      toast.success('Transaction saved')
-      setShowForm(false)
-      setPeriod(transaction.transactionDate.slice(0, 7))
-    } catch (error) { toast.error(`Failed: ${error.message}`) }
+    try { await shopApi('addLedger', { entry: transaction }); toast.success('Transaction saved') }
+    catch (err) { toast.error(`Failed: ${err.message}`); throw err }
     finally { setSaving(false) }
   }
-  const remove = async id => {
+
+  const deleteEntry = async id => {
     if (!confirm('Delete this finance entry?')) return
-    try { await deleteDoc(doc(db, 'ledger', id)); toast.success('Entry deleted') }
-    catch (error) { toast.error(`Delete failed: ${error.message}`) }
+    try { await shopApi('deleteLedger', { entryId: id }); toast.success('Entry deleted') }
+    catch (err) { toast.error(`Delete failed: ${err.message}`) }
+  }
+
+  if (!reportsReady) return <div className="monthly-report-setup" role="status">Finish monthly report setup in Orders to view accurate finance totals.</div>
+  return <LedgerView {...{ entries, orders, saving, addEntry, deleteEntry }} savedReceipts={reports ? reportReceipts(reports) : undefined} />
+}
+
+export function LedgerView({ entries, orders = [], saving = false, addEntry, deleteEntry, savedReceipts }) {
+  const currentMonth = transactionDateBounds().max.slice(0, 7)
+  const [activeView, setActiveView] = useState('dashboard')
+  const [period, setPeriod] = useState(currentMonth)
+  const [historyType, setHistoryType] = useState('all')
+  const receipts = useMemo(() => savedReceipts || revenueReceipts(orders), [orders, savedReceipts])
+  const loans = useMemo(() => loanSummary(orders), [orders])
+
+  const periodOptions = useMemo(() => financeMonthOptions(entries, receipts), [entries, receipts])
+
+  const selectedEntries = useMemo(() => period === 'all' ? entries : entries.filter(entry => monthKey(entry) === period), [entries, period])
+  const selectedOrders = useMemo(() => {
+    return period === 'all' ? receipts : receipts.filter(order => monthKey(order) === period)
+  }, [receipts, period])
+  const totals = useMemo(() => financeTotals(selectedEntries, selectedOrders), [selectedEntries, selectedOrders])
+  const activity = useMemo(() => buildActivity(selectedEntries, selectedOrders), [selectedEntries, selectedOrders])
+  const transactionCount = selectedEntries.length + selectedOrders.reduce((sum, receipt) => sum + (receipt.receiptCount || 1), 0)
+  const history = historyType === 'all' ? activity : activity.filter(item => (item.kind === 'daily-sales' ? 'sale' : item.type === 'spent' ? 'procurement' : item.type) === historyType)
+
+  const saveEntry = async transaction => {
+    try {
+      await addEntry(transaction)
+      setPeriod(transaction.transactionDate.slice(0, 7))
+      setActiveView('dashboard')
+    } catch { /* Keep the form visible for retry. */ }
   }
 
   return <div className="finance-ledger">
-    <div className="finance-overview-heading"><div><span className="eyebrow">MONEY IN, MONEY OUT</span><h2>Know what the shop is making.</h2><p>Paid orders become sales automatically. Add purchases, refunds, income, and self-use here.</p></div><button className="finance-add-button" onClick={() => setShowForm(value => !value)}><Plus size={15} /> Add transaction</button></div>
-    <div className="finance-period-picker"><label htmlFor="finance-month">Period</label><select id="finance-month" value={period} onChange={event => setPeriod(event.target.value)}><option value="all">All time</option>{monthOptions.map(month => <option key={month} value={month}>{new Date(`${month}-01T12:00:00`).toLocaleString('en-IN', { month: 'long', year: 'numeric' })}</option>)}</select></div>
-    <Totals entries={selectedEntries} orders={selectedOrders} />
-    <div className="finance-charts">
-      <section className="finance-chart-panel"><h3>Daily sales and procurement</h3>{dailyFlow.length ? <div className="finance-daily-chart">{dailyFlow.map(day => <div key={day.key} className="finance-daily-day" title={`${day.key} · Sales ${money(day.sales)} · Procurement ${money(day.procurement)}`}><div className="finance-daily-bars"><i style={{ height: `${day.sales / dailyCeiling * 100}%`, background: 'var(--success)' }} /><i style={{ height: `${day.procurement / dailyCeiling * 100}%`, background: 'var(--danger)' }} /></div><small>{day.key.slice(8)}</small></div>)}</div> : <p>No data for this period.</p>}<div className="finance-chart-legend"><span style={{ color: 'var(--success)' }}>● Sales</span><span style={{ color: 'var(--danger)' }}>● Procurement</span></div></section>
-      <section className="finance-chart-panel"><h3>Transaction mix</h3>{[['Procurement', totals.procurement], ['Refunds', totals.refund], ['Cashback', totals.cashback], ['Self use', totals.self]].map(([label, value]) => <div className="finance-mix-row" key={label}><span>{label}</span><strong>{money(value)}</strong></div>)}</section>
-    </div>
-    <AnimatePresence>{showForm && <EntryForm saving={saving} onSave={save} onClose={() => setShowForm(false)} />}</AnimatePresence>
-    <div className="finance-section-heading"><div><h3>Activity</h3><p>{visible.length} of {activity.length} records</p></div><label className="finance-search"><Search size={15} /><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search finance activity" /></label></div>
-    <div className="finance-filters">{[['all', 'All'], ['sale', 'Sales'], ['procurement', 'Procurement'], ['refund', 'Refunds'], ['cashback', 'Cashback'], ['self', 'Self use'], ['earned', 'Other income']].map(([value, label]) => <button key={value} className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
-    <div className="finance-activity-list">
-      {visible.length === 0 ? <div className="finance-empty"><Wallet size={24} /><strong>No matching activity</strong><p>Try another filter or add a transaction.</p></div> : visible.map(item => {
-        const sale = item.kind === 'sale'
-        const amount = sale ? item.total : item.amount || item.spent || item.earned || item.self || item.refund || item.cashback
-        const positive = sale || ['earned', 'refund', 'cashback'].includes(item.type)
-        return <motion.div layout className="finance-activity-row" key={`${item.kind}-${item.id}`}>
-          <span className="finance-activity-icon">{sale ? <ShoppingBag size={16} /> : <Wallet size={16} />}</span>
-          <div className="finance-activity-copy"><strong>{sale ? item.customerName || 'Customer order' : item.note || 'Ledger entry'}</strong><p>{sale ? (item.items || []).map(product => `${product.name} ×${product.qty}`).join(', ') : TYPES[item.type]?.label || 'Older entry'}</p><time>{itemDate(item).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</time></div>
-          <div className="finance-activity-values"><strong className={positive ? 'is-positive' : 'is-negative'}>{positive ? '+' : '−'}{money(amount)}</strong>{!sale && <button onClick={() => remove(item.id)}><Trash2 size={14} /><span>Delete</span></button>}</div>
-        </motion.div>
-      })}
-    </div>
+    <div className="finance-overview-heading"><div><span className="eyebrow">FINANCE</span><h2>Shop money</h2></div></div>
+    <nav className="finance-view-tabs" aria-label="Finance sections">
+      {[['dashboard', 'Dashboard'], ['add', 'Add'], ['history', 'History']].map(([value, label]) => <button type="button" key={value} className={activeView === value ? 'is-active' : ''} onClick={() => setActiveView(value)}>{label}</button>)}
+    </nav>
+
+    {activeView === 'dashboard' && <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <PeriodPicker period={period} options={periodOptions} onChange={setPeriod} count={transactionCount} />
+      <div className="finance-stats">
+        <StatBox label="Profit" value={`${totals.profit >= 0 ? '+' : '−'}${money(Math.abs(totals.profit))}`} tone={totals.profit >= 0 ? 'success' : 'danger'} />
+        <StatBox label="Earned sales" value={money(totals.sales)} tone="success" />
+        <StatBox label="Procurement" value={money(totals.procurement)} tone="danger" />
+        <StatBox label="Transactions" value={transactionCount} tone="accent" />
+      </div>
+      <div className="finance-self-strip"><div><span>Self use</span><strong>{money(totals.self)}</strong></div></div>
+      <div className="finance-loan-strip"><span>Outstanding loans · all time</span><strong>{money(loans.total)}</strong><small>Partial balances {money(loans.partial)} · Loaned {money(loans.loaned)}</small></div>
+      <div className="finance-dashboard-grid"><DailyFlow entries={selectedEntries} orders={selectedOrders} /><TransactionMix totals={totals} /></div>
+      <section className="finance-recent-panel">
+        <div className="finance-section-heading"><h3>Recent transactions</h3>{activity.length > 5 && <button type="button" onClick={() => setActiveView('history')}>View all</button>}</div>
+        <div className="finance-activity-list">{activity.length ? <AnimatePresence initial={false}>{activity.slice(0, 5).map(item => <ActivityRow key={`${item.kind}-${item.id}`} item={item} onDelete={deleteEntry} />)}</AnimatePresence> : <div className="finance-empty"><strong>No transactions</strong></div>}</div>
+      </section>
+    </motion.div>}
+
+    {activeView === 'add' && <TransactionForm saving={saving} onSave={saveEntry} onCancel={() => setActiveView('dashboard')} />}
+
+    {activeView === 'history' && <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <PeriodPicker period={period} options={periodOptions} onChange={setPeriod} count={transactionCount} />
+      <div className="finance-history-filters">{[['all', 'All'], ['sale', 'Earned'], ['procurement', 'Procurement'], ['refund', 'Refunds'], ['cashback', 'Cashback'], ['self', 'Self use']].map(([value, label]) => <button type="button" key={value} className={historyType === value ? 'is-active' : ''} onClick={() => setHistoryType(value)}>{label}</button>)}</div>
+      <div className="finance-activity-list">{history.length ? <AnimatePresence initial={false}>{history.map(item => <ActivityRow key={`${item.kind}-${item.id}`} item={item} onDelete={deleteEntry} />)}</AnimatePresence> : <div className="finance-empty"><strong>No transactions</strong></div>}</div>
+    </motion.div>}
   </div>
 }

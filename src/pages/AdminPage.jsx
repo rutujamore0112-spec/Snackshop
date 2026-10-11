@@ -1,44 +1,39 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Edit2, Trash2, Check, X, LogOut, Package, MessageSquare, ShoppingBag, ImageIcon, Upload, Link, ChevronDown, ChevronUp, Clock, Loader, CheckCircle, Wallet, Store, DoorClosed, Eye, EyeOff, Search } from 'lucide-react'
+import { Plus, Edit2, Trash2, Check, X, LogOut, Package, MessageSquare, ShoppingBag, ImageIcon, Upload, Link, ChevronDown, ChevronUp, Clock, Loader, CheckCircle, Wallet, Store, DoorClosed, Eye, EyeOff, Search, Download, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, orderBy, query, writeBatch, getDoc, setDoc, serverTimestamp
+  doc, orderBy, query, writeBatch, getDoc, setDoc, serverTimestamp, deleteField, where, getDocs, Timestamp
 } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { signOut, onAuthStateChanged } from 'firebase/auth'
 import { motion, AnimatePresence } from 'framer-motion'
+import { press, quickTransition } from '../lib/motion'
 import { db, auth, storage } from '../lib/firebase'
 import Ledger from '../components/Ledger'
-import { updateOrderStatus } from '../lib/orders'
-import { isExpiredDraft } from '../lib/orderLifecycle.mjs'
-import { isCapturedRazorpayOrder, isVisibleAdminOrder, cancellationLabel } from '../lib/adminOrderViews.mjs'
+import { shopApi } from '../lib/shopApi'
+import { REPORT_TYPE, isActiveOrder, canDeleteHistory, monthLabel, monthBounds, reportTotals, downloadMonthlyCsv } from '../lib/monthlyReports.mjs'
+import { createAdminOrderFeed, monthOrdersForView } from '../lib/adminOrderFeed.mjs'
+import { ORDER_HISTORY_HOURS } from '../lib/customerHistory'
+import { useHistoryWindow } from '../lib/useHistoryWindow'
 import ThemeToggle from '../components/ThemeToggle'
 import useThemePreference from '../lib/useThemePreference'
+import CashPaymentActions from '../components/CashPaymentActions'
+import { cashPaymentPatch, collectedAmount, outstandingAmount, loanSummary, money } from '../lib/orderPayments.mjs'
 
-const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen', 'drinks', 'noodles']
-
-const ADMIN_EMAIL = 'rutujamore0112@gmail.com'
-
-// Order statuses that still hold a live `reserved` quantity on a product.
-// Anything outside this set (paid / cancelled) has already been settled,
-// so there's nothing left to release.
-const ACTIVE_RESERVING_STATUSES = ['pending', 'utr_submitted', 'draft']
-const hasCapturedRazorpayPayment = order => isCapturedRazorpayOrder(order)
-const needsOrderAction = order => isCapturedRazorpayOrder(order)
-  ? !order.acceptedAt
-  : order.paymentMethod !== 'razorpay' && ACTIVE_RESERVING_STATUSES.includes(order.status)
+const CATEGORIES = ['chips', 'biscuits', 'sweets', 'namkeen', 'noodles', 'drinks']
 
 export const REQUEST_STATUSES = {
   pending:     { label: 'Pending',     color: 'var(--warning)',  dim: 'var(--warning-dim)',  icon: Clock },
-  in_progress: { label: 'In Progress', color: 'var(--accent)',   dim: 'var(--accent-dim)',   icon: Loader },
+  in_progress: { label: 'In Progress', color: 'var(--info)',     dim: 'var(--info-dim)',   icon: Loader },
   completed:   { label: 'Completed',   color: 'var(--success)',  dim: 'var(--success-dim)',  icon: CheckCircle },
 }
 
 function StatCard({ label, value, color, maskable = false }) {
   const [revealed, setRevealed] = useState(false)
   const hidden = maskable && !revealed
+
   return (
     <motion.div 
       whileHover={{ y: -3 }}
@@ -46,8 +41,19 @@ function StatCard({ label, value, color, maskable = false }) {
       style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px 20px', position: 'relative' }}
     >
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 26, color: color || 'var(--accent)', filter: hidden ? 'blur(8px)' : 'none', userSelect: hidden ? 'none' : 'auto' }}>{hidden ? '••••••' : value}</div>
-      {maskable && <button onClick={() => setRevealed(value => !value)} title={revealed ? 'Hide revenue' : 'Show revenue'} aria-label={revealed ? 'Hide revenue' : 'Show revenue'} style={{ position: 'absolute', top: 11, right: 11, width: 30, height: 30, display: 'grid', placeItems: 'center', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface2)', color: 'var(--text-secondary)' }}>{revealed ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
+      <div style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 26, color: color || 'var(--accent)', filter: hidden ? 'blur(8px)' : 'none', userSelect: hidden ? 'none' : 'auto', transition: 'filter 0.2s' }}>
+        {hidden ? '••••••' : value}
+      </div>
+      {maskable && (
+        <motion.button className="icon-button icon-button--compact" whileTap={press}
+          onClick={() => setRevealed(r => !r)}
+          aria-label={revealed ? 'Hide revenue' : 'Show revenue'}
+          style={{ position: 'absolute', top: 12, right: 12, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: 5, color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}
+          title={revealed ? 'Hide revenue' : 'Show revenue'}
+        >
+          {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
+        </motion.button>
+      )}
     </motion.div>
   )
 }
@@ -55,14 +61,12 @@ function StatCard({ label, value, color, maskable = false }) {
 function NoImagePlaceholder({ small = false }) {
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-      <span style={{ fontSize: small ? 9 : 12, fontFamily: 'Syne', fontWeight: 700, color: 'rgba(255,255,255,0.13)', transform: 'rotate(-35deg)', letterSpacing: '0.06em', userSelect: 'none', whiteSpace: 'nowrap' }}>
-        NO IMAGE
-      </span>
+      <ImageIcon size={small ? 18 : 26} color="var(--text-hint)" aria-label="No product image" />
     </div>
   )
 }
 
-function ImageUploader({ currentUrl, onUploaded, productId }) {
+function ImageUploader({ currentUrl, onUploaded, productId, preview = false }) {
   const [uploading, setUploading] = useState(false)
   const [mode, setMode] = useState('file')
   const [urlInput, setUrlInput] = useState('')
@@ -73,6 +77,10 @@ function ImageUploader({ currentUrl, onUploaded, productId }) {
     if (!file) return
     if (!file.type.startsWith('image/')) { toast.error('Select an image file'); return }
     if (file.size > 5 * 1024 * 1024) { toast.error('Image must be under 5MB'); return }
+    if (preview) {
+      onUploaded(URL.createObjectURL(file))
+      return
+    }
     setUploading(true)
     try {
       const storageRef = ref(storage, `products/${productId || Date.now()}_${file.name}`)
@@ -116,17 +124,17 @@ function ImageUploader({ currentUrl, onUploaded, productId }) {
         )}
       </motion.div>
       <div style={{ display: 'flex', gap: 4 }}>
-        <button onClick={() => inputRef.current.click()} style={{ flex: 1, padding: '4px 6px', background: mode === 'file' ? 'var(--accent-dim)' : 'var(--surface2)', border: `1px solid ${mode === 'file' ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, color: mode === 'file' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer' }}>
+        <motion.button whileTap={press} onClick={() => inputRef.current.click()} style={{ flex: 1, padding: '4px 6px', background: mode === 'file' ? 'var(--accent-dim)' : 'var(--surface2)', border: `1px solid ${mode === 'file' ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, color: mode === 'file' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer' }}>
           <Upload size={9} /> Upload
-        </button>
-        <button onClick={() => setMode(m => m === 'url' ? 'file' : 'url')} style={{ flex: 1, padding: '4px 6px', background: mode === 'url' ? 'var(--accent-dim)' : 'var(--surface2)', border: `1px solid ${mode === 'url' ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, color: mode === 'url' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer' }}>
+        </motion.button>
+        <motion.button whileTap={press} onClick={() => setMode(m => m === 'url' ? 'file' : 'url')} style={{ flex: 1, padding: '4px 6px', background: mode === 'url' ? 'var(--accent-dim)' : 'var(--surface2)', border: `1px solid ${mode === 'url' ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, color: mode === 'url' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'pointer' }}>
           <Link size={9} /> URL
-        </button>
+        </motion.button>
       </div>
       {mode === 'url' && (
         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} style={{ display: 'flex', gap: 4, marginTop: 2 }}>
           <input value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="Paste image URL..." style={{ fontSize: 11, padding: '5px 8px', flex: 1 }} onKeyDown={e => e.key === 'Enter' && handleUrlSave()} />
-          <button onClick={handleUrlSave} style={{ padding: '5px 8px', background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: 6, fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer' }}>OK</button>
+          <motion.button whileTap={press} onClick={handleUrlSave} style={{ padding: '5px 8px', background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: 6, fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer' }}>OK</motion.button>
         </motion.div>
       )}
     </div>
@@ -147,37 +155,45 @@ function groupByMonth(orders) {
   return groups
 }
 
-function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject, onDelete, onDeleteAll }) {
-  const [collapsed, setCollapsed] = useState(false)
-  const paidTotal = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const pendingCount = orders.filter(needsOrderAction).length
-  const deletableOrders = orders.filter(o => !isCapturedRazorpayOrder(o))
+export function MonthGroup({ label, orders, processing, onMarkPaid, onReject, onAcceptPaid, onDelete, onDeleteAll, summary, onToggle, loading, error, onRetry, reportsReady = true, keepOpen = false }) {
+  const [manuallyCollapsed, setCollapsed] = useState(Boolean(summary))
+  const collapsed = keepOpen ? false : manuallyCollapsed
+  const orderCount = summary ? (summary.orderCount || 0) : orders.length
+  const paidTotal = summary ? reportTotals(summary).revenue : orders.reduce((s, o) => s + collectedAmount(o), 0)
+  const owedTotal = summary ? Number(summary.owedCents || 0) / 100 : loanSummary(orders).total
+  const pendingCount = orders.filter(o => o.status === 'utr_submitted' || o.status === 'pending').length
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <div className="admin-month-header"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
-        onClick={() => setCollapsed(c => !c)}
+      <div 
+        className="monthly-order-heading"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: keepOpen ? 'default' : 'pointer' }}
+        onClick={() => { if (!keepOpen) { onToggle?.(collapsed); setCollapsed(c => !c) } }}
       >
-        <div className="admin-month-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <motion.div animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {!keepOpen && <motion.div animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>
             <ChevronDown size={15} color="var(--text-secondary)" />
-          </motion.div>
+          </motion.div>}
           <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 15 }}>{label}</span>
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{orders.length} order{orders.length !== 1 ? 's' : ''}</span>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{orderCount} order{orderCount !== 1 ? 's' : ''}</span>
           {pendingCount > 0 && (
             <span style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, padding: '1px 8px', fontSize: 11, fontWeight: 700 }}>{pendingCount} pending</span>
           )}
         </div>
-        <div className="admin-month-summary" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14, color: 'var(--accent)' }}>₹{paidTotal} collected</span>
-          {deletableOrders.length > 0 && <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={e => { e.stopPropagation(); onDeleteAll(deletableOrders) }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 14, color: 'var(--accent)' }}>{money(paidTotal)} collected</span>
+          {owedTotal > 0 && <span className="order-owed-total">{money(owedTotal)} owed</span>}
+          {summary && <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{money(reportTotals(summary).profit)} profit</span>}
+          {summary && <button className="monthly-report-button" disabled={!reportsReady} onClick={e => { e.stopPropagation(); downloadMonthlyCsv([summary], summary.month) }} title={`Download ${label} CSV`}><Download size={13} /> CSV</button>}
+          {summary && !collapsed && <button className="monthly-report-button" disabled={loading} onClick={e => { e.stopPropagation(); onRetry?.() }} aria-label={`Refresh ${label}`}><RefreshCw size={13} /></button>}
+          {onDeleteAll && (!summary || !collapsed) && <motion.button
+            whileTap={press}
+            disabled={loading || (summary && (!reportsReady || !orders.some(canDeleteHistory)))}
+            onClick={e => { e.stopPropagation(); onDeleteAll(orders) }}
             style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '4px 10px', color: 'var(--danger)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
-            title={`Delete ${deletableOrders.length} non-Razorpay orders from ${label}`}
+            title={`Delete completed ${label} history; keep active orders and loans`}
           >
-            <Trash2 size={11} /> Delete {deletableOrders.length}
+            <Trash2 size={11} /> {summary ? 'Delete history' : 'Delete all'}
           </motion.button>}
         </div>
       </div>
@@ -188,37 +204,22 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}
+            transition={quickTransition}
+            className="admin-order-list"
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden', position: 'relative' }}
           >
+            {loading && <p role="status">Loading this month's orders...</p>}
+            {error && <p role="alert">{error} <button className="monthly-report-button" onClick={onRetry}>Retry</button></p>}
+            {summary && !loading && !error && orders.length === 0 && <p className="monthly-history-note">No orders stored for this month. Saved reports remain available.</p>}
+            <AnimatePresence initial={false} mode="popLayout">
             {orders.map(o => {
-              const needsAction = needsOrderAction(o)
-              const capturedRazorpay = isCapturedRazorpayOrder(o)
-              const awaitingAcceptance = capturedRazorpay && !o.acceptedAt
+              const needsAction = o.status === 'utr_submitted' || o.status === 'pending'
+              const isNewPaidRazorpayOrder = o.status === 'paid' && o.paymentMethod === 'upi' && !o.accepted
               const isProcessing = processing[o.id]
-              if (capturedRazorpay) return (
-                <motion.div key={o.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
-                  className={`admin-acceptance-card${awaitingAcceptance ? ' is-ready' : ''}`}>
-                  {awaitingAcceptance && <span className="admin-acceptance-ribbon">READY TO ACCEPT</span>}
-                  <div className="admin-acceptance-main">
-                    <div className="admin-acceptance-details">
-                      <strong>{o.customerName}</strong>
-                      <span className="admin-acceptance-items">{(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}</span>
-                      <time>{o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</time>
-                    </div>
-                    <div className="admin-acceptance-meta">
-                      <strong>₹{o.total}</strong>
-                      <span className={`admin-acceptance-status ${awaitingAcceptance ? 'is-paid' : 'is-accepted'}`}>{awaitingAcceptance ? 'Paid' : 'Accepted'}</span>
-                      {!awaitingAcceptance && <button className="admin-acceptance-delete" onClick={() => onDelete(o)} title="Remove from admin orders; keep payment record"><Trash2 size={13} /> Delete</button>}
-                    </div>
-                  </div>
-                  {awaitingAcceptance && <div className="admin-acceptance-actions">
-                    <motion.button whileTap={{ scale: 0.98 }} onClick={() => onAccept(o)} disabled={isProcessing} className="admin-acceptance-primary">
-                      {isProcessing ? 'Accepting...' : 'Accept verified order'}
-                    </motion.button>
-                  </div>}
-                </motion.div>
-              )
+              const balance = outstandingAmount(o)
+              const hasBalance = balance > 0
+              const cashAction = o.paymentMethod === 'cash' && (o.status === 'pending' || hasBalance)
+              const debtTone = o.status === 'loaned' ? 'danger' : 'warning'
               return (
                 <motion.div 
                   key={o.id}
@@ -226,59 +227,107 @@ function MonthGroup({ label, orders, processing, onMarkPaid, onAccept, onReject,
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className={`admin-acceptance-card${needsAction ? ' is-action-required' : ''}`}
+                  className={hasBalance ? `order-outstanding order-outstanding-${o.status}` : ''}
+                  style={{ background: hasBalance ? `var(--${debtTone}-dim)` : 'var(--surface)', border: `1px solid ${hasBalance ? `var(--${debtTone})` : (needsAction || isNewPaidRazorpayOrder) ? 'rgba(var(--accent-rgb),0.4)' : 'var(--border)'}`, borderRadius: 'var(--radius)', padding: '14px 16px', position: 'relative' }}
                 >
-                  {needsAction && <span className="admin-acceptance-ribbon">ACTION REQUIRED</span>}
-                  <div className="admin-acceptance-main">
-                    <div className="admin-acceptance-details">
-                      <strong>{o.customerName}</strong>
-                      <span className="admin-acceptance-items">{(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}</span>
+                  {(needsAction || isNewPaidRazorpayOrder) && (
+                    <div style={{ position: 'absolute', top: -9, left: 14, background: 'var(--accent)', color: 'var(--accent-text)', fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 100, fontFamily: 'Syne' }}>
+                      {isNewPaidRazorpayOrder ? 'READY TO ACCEPT' : 'ACTION REQUIRED'}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 5 }}>{o.customerName}</div>
+                      
+                      {/* FIX: Always render the ordered items so the admin can start preparing them! */}
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, fontStyle: o.status === 'paid' ? 'normal' : 'italic' }}>
+                        {(o.items || []).map(item => `${item.name} x${item.qty}`).join(', ')}
+                      </div>
+
                       {o.utr && (
                         <div style={{ fontSize: 11, background: 'var(--surface2)', borderRadius: 6, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'monospace', color: 'var(--text-secondary)', marginBottom: 4 }}>
                           UTR: <strong style={{ color: 'var(--accent)' }}>{o.utr}</strong>
                         </div>
                       )}
-                      <time>{o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</time>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
+                        {o.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}
+                      </div>
+                      {o.status === 'paid' && ['cash', 'upi'].includes(o.paymentMethod) && (
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>
+                          {o.paymentMethod === 'cash' ? 'Paid by cash' : 'Paid by RazorPay'}
+                        </div>
+                      )}
+                      {hasBalance && <div className={`order-payment-balance order-payment-balance-${o.status}`}>
+                        <strong>{o.status === 'loaned' ? 'Loaned' : 'Paid partially'} · Cash</strong>
+                        <span>Received {money(collectedAmount(o))} <b>Outstanding {money(balance)}</b></span>
+                      </div>}
                     </div>
-                    <div className="admin-acceptance-meta">
-                      <strong>₹{o.total}</strong>
-                      <span className={`admin-acceptance-status ${o.status === 'paid' ? 'is-accepted' : o.status === 'cancelled' ? 'is-cancelled' : 'is-awaiting'}`}>
-                        {o.paymentMethod === 'cash' && o.status === 'pending' ? 'Cash · awaiting' : o.status === 'paid' ? 'Accepted' : o.status === 'draft' ? 'Awaiting payment' : o.status === 'utr_submitted' ? 'Pending verify' : o.status}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                      <div style={{ fontFamily: 'Syne', fontWeight: 700, fontSize: 18 }}>₹{o.total}</div>
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 100, background: hasBalance ? `var(--${debtTone}-dim)` : o.status === 'paid' ? 'var(--success-dim)' : o.status === 'cancelled' ? 'var(--danger-dim)' : o.status === 'utr_submitted' ? 'var(--accent-dim)' : 'var(--warning-dim)', color: hasBalance ? `var(--${debtTone})` : o.status === 'paid' ? 'var(--success)' : o.status === 'cancelled' ? 'var(--danger)' : o.status === 'utr_submitted' ? 'var(--accent)' : 'var(--warning)' }}>
+                        {o.status === 'partially_paid' ? 'Paid partially' : o.status === 'loaned' ? 'Loaned' : o.status === 'utr_submitted' ? 'UPI · verify' : o.status === 'pending' ? 'Cash · awaiting' : o.status === 'paid' ? o.paymentMethod === 'cash' ? 'Paid in full' : o.accepted ? 'Accepted' : 'Awaiting acceptance' : o.status}
                       </span>
-                      {o.status === 'cancelled' && <span className="admin-acceptance-cancelled-by">{o.cancelledBy === 'admin' ? 'by admin' : o.cancelledBy === 'timeout' ? 'payment expired' : 'by customer'}</span>}
-                      <button className="admin-acceptance-delete" onClick={() => onDelete(o)} title="Delete this order"><Trash2 size={13} /> Delete</button>
+                      {o.status === 'cancelled' && o.cancelledBy && (
+                        <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>
+                          by {o.cancelledBy === 'customer' ? 'customer' : 'you'}
+                        </span>
+                      )}
+                      {onDelete && <motion.button
+                        whileTap={press}
+                        onClick={() => onDelete(o.id)}
+                        style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '3px 8px', color: 'var(--danger)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}
+                        title="Delete this order"
+                      >
+                        <Trash2 size={10} /> Delete
+                      </motion.button>}
                     </div>
                   </div>
 
-                  {needsAction && (
-                    <div className="admin-acceptance-actions">
-                      <motion.button
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => onMarkPaid(o)}
-                        disabled={isProcessing || o.status === 'draft'}
-                        className="admin-acceptance-primary"
-                      >
-                        {isProcessing
-                          ? 'Processing...'
-                          : o.status === 'draft'
-                            ? 'Awaiting payment'
-                            : o.paymentMethod === 'cash'
-                            ? 'Accept cash + deduct stock'
-                            : 'Mark as Paid — deduct stock'}
-                      </motion.button>
-                      <motion.button
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => onReject(o)}
-                        disabled={isProcessing}
-                        className="admin-acceptance-reject"
-                      >
-                        Reject payment
-                      </motion.button>
+                  {cashAction ? <div className="cash-order-controls">
+                    <CashPaymentActions order={o} processing={isProcessing} onSave={onMarkPaid} />
+                    {o.status === 'pending' && <button className="cash-reject" disabled={isProcessing} onClick={() => onReject(o)}>Reject order</button>}
+                  </div> : (needsAction || isNewPaidRazorpayOrder) && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                      {isNewPaidRazorpayOrder ? (
+                        <motion.button
+                          whileTap={press}
+                          onClick={() => onAcceptPaid(o)}
+                          disabled={isProcessing}
+                          style={{ flex: 1, padding: 10, background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 8, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 700, fontSize: 13, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                        >
+                            {isProcessing ? 'Processing...' : 'Accept verified order'}
+                        </motion.button>
+                      ) : (
+                        <>
+                          <motion.button
+                            whileTap={press}
+                            onClick={() => onMarkPaid(o)}
+                            disabled={isProcessing}
+                            style={{ flex: 1, padding: 10, background: isProcessing ? 'var(--surface2)' : 'var(--success)', border: 'none', borderRadius: 8, color: isProcessing ? 'var(--text-secondary)' : 'white', fontFamily: 'Syne', fontWeight: 700, fontSize: 13, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                          >
+                            {isProcessing
+                              ? 'Processing...'
+                              : o.status === 'pending'
+                                ? 'Accept cash + deduct stock'
+                                : 'Verify UPI + deduct stock'}
+                          </motion.button>
+                          <motion.button
+                            whileTap={press}
+                            onClick={() => onReject(o)}
+                            disabled={isProcessing}
+                            style={{ padding: '10px 16px', background: 'var(--danger-dim)', border: 'none', borderRadius: 8, color: 'var(--danger)', fontSize: 13, fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                          >
+                            Reject payment
+                          </motion.button>
+                        </>
+                      )}
                     </div>
                   )}
                 </motion.div>
               )
             })}
+
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
@@ -297,17 +346,43 @@ function RequestStatusBadge({ status }) {
   )
 }
 
+export function MonthlyHistory({ report, liveOrders, revision, reportsReady, loadHistory, ...actions }) {
+  const [orders, setOrders] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const generation = useRef(0)
+  const load = async (force = false) => {
+    const current = ++generation.current
+    setLoading(true); setError('')
+    try {
+      let loaded
+      if (loadHistory) loaded = await loadHistory(report.month, force)
+      else {
+        const [start, end] = monthBounds(report.month)
+        const snapshot = await getDocs(query(collection(db, 'orders'), where('createdAt', '>=', Timestamp.fromDate(start)), where('createdAt', '<', Timestamp.fromDate(end)), orderBy('createdAt', 'desc')))
+        loaded = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+      }
+      if (current === generation.current) setOrders(loaded.filter(order => order.status !== 'draft'))
+    } catch (err) { if (current === generation.current) setError(`Could not load this month: ${err.message}`) }
+    finally { if (current === generation.current) setLoading(false) }
+  }
+  useEffect(() => () => { generation.current++ }, [])
+  const history = monthOrdersForView(report.month, orders || [], liveOrders)
+  return <MonthGroup {...actions} summary={report} label={monthLabel(report.month)} orders={history} loading={loading} error={error} reportsReady={reportsReady}
+    onRetry={() => load(true)} onToggle={open => { if (open && orders === null && !loading) load() }} />
+}
+
 function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll }) {
   const [collapsed, setCollapsed] = useState(false)
   const pendingCount = requests.filter(r => !r.resolved).length
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <div className="admin-month-header"
+      <div
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
         onClick={() => setCollapsed(c => !c)}
       >
-        <div className="admin-month-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <motion.div animate={{ rotate: collapsed ? -90 : 0 }} transition={{ duration: 0.2 }}>
             <ChevronDown size={15} color="var(--text-secondary)" />
           </motion.div>
@@ -318,7 +393,7 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
           )}
         </div>
         <motion.button
-          whileTap={{ scale: 0.9 }}
+          whileTap={press}
           onClick={e => { e.stopPropagation(); onDeleteAll(requests) }}
           style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: '4px 10px', color: 'var(--danger)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
           title={`Delete all ${label} requests`}
@@ -333,9 +408,10 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}
+            transition={quickTransition}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden', position: 'relative' }}
           >
+            <AnimatePresence initial={false} mode="popLayout">
             {requests.map(r => {
               const status = r.status || (r.resolved ? 'completed' : 'pending')
               const nextStatus = status === 'pending' ? 'in_progress' : status === 'in_progress' ? 'completed' : null
@@ -349,12 +425,12 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
                   exit={{ opacity: 0, scale: 0.95 }}
                   style={{
                     background: 'var(--surface)',
-                    border: `1px solid ${status === 'pending' ? 'rgba(135,206,235,0.2)' : status === 'in_progress' ? 'rgba(135,206,235,0.2)' : 'var(--border)'}`,
+                    border: `1px solid ${status === 'pending' ? 'rgba(var(--accent-rgb),0.2)' : status === 'in_progress' ? 'rgba(var(--accent-rgb),0.2)' : 'var(--border)'}`,
                     borderRadius: 'var(--radius)',
                     padding: '14px 16px',
                   }}
                 >
-                  <div className="admin-request-card-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, fontSize: 14 }}>{r.customerName}</span>
@@ -364,10 +440,10 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</div>
                     </div>
 
-                    <div className="admin-request-card-actions" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                       {nextStatus && (
                         <motion.button
-                          whileTap={{ scale: 0.95 }}
+                          whileTap={press}
                           onClick={() => onSetStatus(r.id, nextStatus)}
                           style={{
                             background: REQUEST_STATUSES[nextStatus].dim,
@@ -384,12 +460,12 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
                             cursor: 'pointer'
                           }}
                         >
-                          {nextStatus === 'in_progress' ? <><Loader size={11} /> Mark In Progress</> : <><CheckCircle size={11} /> Mark Completed</>}
+                          {nextStatus === 'in_progress' ? <><Loader size={11} /> Mark In Progress</> : <><CheckCircle size={11} /> Mark Stocked</>}
                         </motion.button>
                       )}
 
                       <motion.button
-                        whileTap={{ scale: 0.9 }}
+                        whileTap={press}
                         onClick={() => onDelete(r.id)}
                         style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 8, padding: '5px 10px', color: 'var(--danger)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
                         title="Delete request"
@@ -401,6 +477,8 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
                 </motion.div>
               )
             })}
+
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
@@ -410,64 +488,122 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
 
 export default function AdminPage() {
   const navigate = useNavigate()
-  const { theme, toggleTheme } = useThemePreference()
-  const [tab, setTab] = useState('products')
-  const [productSearch, setProductSearch] = useState('')
+  const [tab, setTab] = useState('orders')
   const [products, setProducts] = useState([])
+  const [productSearch, setProductSearch] = useState('')
+  const [productLoadStatus, setProductLoadStatus] = useState('idle')
+  const productsLoaded = useRef(false)
+  const productRequest = useRef(null)
   const [orders, setOrders] = useState([])
+  const [incomingIds, setIncomingIds] = useState(new Set())
+  const [orderView, setOrderView] = useState('new')
+  const [orderLoadStatus, setOrderLoadStatus] = useState({ pending: 'idle', history: 'idle', loans: 'idle' })
+  const orderFeed = useRef(null)
+  if (!orderFeed.current) orderFeed.current = createAdminOrderFeed({
+    db,
+    onChange: (records, ids) => { setOrders(records); setIncomingIds(ids) },
+    onIncoming: order => toast(`New order from ${order.customerName}`),
+    onError: error => toast.error(`Could not watch new orders: ${error.message}`),
+  })
+  const [reports, setReports] = useState([])
+  const [reportStatus, setReportStatus] = useState('preparing')
+  const [reportError, setReportError] = useState('')
+  const [reportProgress, setReportProgress] = useState(0)
+  const [historyRevision, setHistoryRevision] = useState(0)
+  const reportSetupBusy = useRef(false)
+  const mounted = useRef(true)
   const [requests, setRequests] = useState([])
   const [editingId, setEditingId] = useState(null)
   const [editData, setEditData] = useState({})
   const [adding, setAdding] = useState(false)
   const [processing, setProcessing] = useState({})
-  const [deletingAll, setDeletingAll] = useState(false)
+  const paymentRequests = useRef(new Set())
+  const deletingAll = false
   const [deletingAllRequests, setDeletingAllRequests] = useState(false)
   const [newProduct, setNewProduct] = useState({ name: '', category: 'chips', price: '', stock: '', imageUrl: '' })
   const [shopOpen, setShopOpen] = useState(true)
   const [togglingShop, setTogglingShop] = useState(false)
 
-  const isInitialOrdersLoad = useRef(true)
+  const loadProducts = (force = false) => {
+    if (productRequest.current) return productRequest.current
+    if (productsLoaded.current && !force) return Promise.resolve()
+    setProductLoadStatus('loading')
+    productRequest.current = getDocs(collection(db, 'products'))
+      .then(snapshot => {
+        if (!mounted.current) return
+        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })))
+        productsLoaded.current = true
+        setProductLoadStatus('ready')
+      })
+      .catch(err => {
+        if (!mounted.current) return
+        setProductLoadStatus('error')
+        toast.error(`Could not load products: ${err.message}`)
+      })
+      .finally(() => { productRequest.current = null })
+    return productRequest.current
+  }
+
+  const invalidateProducts = () => {
+    productsLoaded.current = false
+    setProductLoadStatus('idle')
+  }
+
+  // Read inventory once when Products opens; searches use the cached list.
+  useEffect(() => {
+    if (tab === 'products') loadProducts()
+  }, [tab])
+
+  const loadOrderView = async (view, force = false) => {
+    if (view !== 'loans') setOrderView(view)
+    if (orderLoadStatus[view] === 'ready' && !force) return
+    setOrderLoadStatus(previous => ({ ...previous, [view]: 'loading' }))
+    try {
+      await orderFeed.current.load(view, force)
+      if (mounted.current) setOrderLoadStatus(previous => ({ ...previous, [view]: 'ready' }))
+    } catch (error) {
+      if (mounted.current) {
+        setOrderLoadStatus(previous => ({ ...previous, [view]: 'error' }))
+        toast.error(`Could not load ${view}: ${error.message}`)
+      }
+    }
+  }
+
+  const loadHistory = async (month, force = false) => {
+    const view = `month:${month}`
+    await orderFeed.current.load(view, force)
+    return orderFeed.current.records(view)
+  }
+
+  const prepareReports = async () => {
+    if (reportSetupBusy.current) return
+    reportSetupBusy.current = true
+    setReportStatus('preparing'); setReportError('')
+    try {
+      while (mounted.current) {
+        const result = await shopApi('initializeReports')
+        if (!mounted.current) break
+        if (result.ready) {
+          const snapshot = await getDocs(query(collection(db, 'ledger'), where('type', '==', REPORT_TYPE)))
+          if (!mounted.current) break
+          setReports(snapshot.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.month.localeCompare(a.month)))
+          setReportStatus('ready'); break
+        }
+        setReportProgress(result.processed || 0)
+      }
+    } catch (err) { if (mounted.current) { setReportStatus('error'); setReportError(err.message) } }
+    finally { reportSetupBusy.current = false }
+  }
+
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, user => {
-      if (!user) {
-        navigate('/admin')
-        return
-      }
+    mounted.current = true
+    const unsub = onAuthStateChanged(auth, user => { if (!user) navigate('/admin'); else prepareReports() })
 
-      if (user.email?.toLowerCase() !== ADMIN_EMAIL) {
-        navigate('/')
-      }
-    })
-
-    const pUnsub = onSnapshot(collection(db, 'products'), snap => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      data.sort((a, b) => (b.stock || 0) - (a.stock || 0) || (a.name || '').localeCompare(b.name || ''))
-      setProducts(data)
-    }, err => console.error('Products error:', err))
-
-    const oUnsub = onSnapshot(
-      query(collection(db, 'orders'), orderBy('createdAt', 'desc')),
-      snap => {
-        if (!isInitialOrdersLoad.current) {
-          snap.docChanges().forEach(change => {
-            const data = change.doc.data()
-            if (change.type === 'added' && isVisibleAdminOrder(data) && needsOrderAction(data)) {
-              toast(`New order from ${data.customerName}`)
-            }
-            if (change.type === 'modified' && data.status === 'cancelled') {
-              toast(cancellationLabel(data))
-            } else if (change.type === 'modified' && isVisibleAdminOrder(data) && needsOrderAction(data) && (data.status === 'utr_submitted' || data.status === 'pending' || data.status === 'paid')) {
-              toast(isCapturedRazorpayOrder(data) ? `Razorpay payment confirmed from ${data.customerName} — accept order` : `Payment submitted by ${data.customerName}`)
-            }
-          })
-        }
-        isInitialOrdersLoad.current = false
-        const allOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        setOrders(allOrders)
-      },
-      err => { console.error('Orders error:', err); toast.error('Could not load orders. Check your connection and Firebase permissions.') }
-    )
+    const ordersUnsub = orderFeed.current.start()
+    const reportsUnsub = onSnapshot(query(collection(db, 'ledger'), where('type', '==', REPORT_TYPE)), snap => {
+      setReports(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.month.localeCompare(a.month)))
+    }, err => { setReportStatus('error'); setReportError(err.message) })
 
     const rUnsub = onSnapshot(
       query(collection(db, 'requests'), orderBy('createdAt', 'desc')),
@@ -479,19 +615,8 @@ export default function AdminPage() {
       setShopOpen(snap.exists() ? snap.data().open !== false : true)
     }, err => console.error('Shop status error:', err))
 
-    return () => { unsub(); pUnsub(); oUnsub(); rUnsub(); sUnsub() }
+    return () => { mounted.current = false; unsub(); ordersUnsub(); reportsUnsub(); rUnsub(); sUnsub() }
   }, [])
-
-  useEffect(() => {
-    const expireDrafts = () => {
-      orders.filter(order => isExpiredDraft(order)).forEach(order => {
-        updateOrderStatus(order.id, 'expire').catch(err => console.error('Order expiry:', err))
-      })
-    }
-    expireDrafts()
-    const timer = setInterval(expireDrafts, 5000)
-    return () => clearInterval(timer)
-  }, [orders])
 
   const toggleShopStatus = async () => {
     setTogglingShop(true)
@@ -504,28 +629,23 @@ export default function AdminPage() {
     setTogglingShop(false)
   }
 
-  const totalRevenue = orders.filter(o => o.status === 'paid').reduce((s, o) => s + (o.total || 0), 0)
-  const visibleOrders = orders.filter(isVisibleAdminOrder)
-  const pendingPayments = visibleOrders.filter(o => (o.paymentMethod === 'cash' && o.status === 'pending') || (o.status === 'utr_submitted' && !o.paymentId)).length
-  const awaitingAcceptance = visibleOrders.filter(o => isCapturedRazorpayOrder(o) && !o.acceptedAt).length
-  const needsActionCount = visibleOrders.filter(needsOrderAction).length
-  const deletableOrders = visibleOrders.filter(o => !isCapturedRazorpayOrder(o))
+  const totalRevenue = reports.reduce((sum, report) => sum + reportTotals(report).revenue, 0)
+  const newOrders = orders.filter(order => incomingIds.has(order.id) && isActiveOrder(order))
+  const pendingPayments = newOrders.filter(order => order.status === 'utr_submitted').length
+  const needsActionCount = newOrders.length
   const pendingReqs = requests.filter(r => !r.resolved).length
-  const monthGroups = groupByMonth(visibleOrders)
+  const monthGroups = groupByMonth(orders)
   const requestMonthGroups = groupByMonth(requests)
 
+  // Live favicon + tab title badge — shows the number of orders needing
+  // action, including newly payment-verified Razorpay orders, NOT requests. Updates automatically
+  // as needsActionCount changes, and reverts to the plain icon at 0.
   useEffect(() => {
-    const baseIcon = (badge) => `
-      <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>
-        <rect width='100' height='100' rx='20' fill='#000000'/>
-        <text y='75' x='50' text-anchor='middle' font-size='70' font-weight='900' fill='#87CEEB' font-family='Arial'>S</text>
-        ${badge}
-      </svg>
-    `.trim()
+    const baseIcon = (badge) => `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='#1546d9'/><text x='50' y='76' text-anchor='middle' font-size='80' font-weight='900' fill='#edece6' font-family='Arial'>S</text>${badge}</svg>`
 
     const badgeMarkup = needsActionCount > 0 ? `
-      <circle cx='78' cy='24' r='${needsActionCount > 9 ? 26 : 22}' fill='#ff5c5c' stroke='#000000' stroke-width='4'/>
-      <text x='78' y='${needsActionCount > 9 ? '33' : '32'}' text-anchor='middle' font-size='${needsActionCount > 9 ? '30' : '34'}' font-weight='900' fill='#ffffff' font-family='Arial'>${needsActionCount > 99 ? '99+' : needsActionCount}</text>
+      <circle cx='78' cy='24' r='${needsActionCount > 9 ? 26 : 22}' fill='#f9b318' stroke='#edece6' stroke-width='4'/>
+      <text x='78' y='${needsActionCount > 9 ? '33' : '32'}' text-anchor='middle' font-size='${needsActionCount > 9 ? '30' : '34'}' font-weight='900' fill='#20232c' font-family='Arial'>${needsActionCount > 99 ? '99+' : needsActionCount}</text>
     ` : ''
 
     const svg = baseIcon(badgeMarkup)
@@ -542,60 +662,67 @@ export default function AdminPage() {
     document.title = needsActionCount > 0
       ? `(${needsActionCount}) SnackShop Admin`
       : 'SnackShop Admin'
+    return () => { link.href = '/favicon.svg?v=4'; document.title = 'SnackShop' }
   }, [needsActionCount])
 
   const handleLogout = async () => {
-    await signOut(auth)
-    navigate('/')
+  await signOut(auth)
+  navigate('/')
+ }
+
+  const markAsPaid = async (order, selection = { type: 'full' }) => {
+    if (processing[order.id] || paymentRequests.current.has(order.id)) return false
+    paymentRequests.current.add(order.id)
+    setProcessing(p => ({ ...p, [order.id]: true }))
+    try {
+      const result = await shopApi('pay', { orderId: order.id, selection, expectedStatus: order.status, expectedCollected: collectedAmount(order) })
+      orderFeed.current.patch(order.id, result.order || (order.paymentMethod === 'cash'
+        ? cashPaymentPatch(order, selection, new Date())
+        : { status: 'paid', accepted: true, paidAt: new Date(), stockDeducted: true }))
+      invalidateProducts()
+      setHistoryRevision(value => value + 1)
+      if (result.updated) {
+        const status = result.order.status
+        const label = status === 'paid' ? result.order.paymentMethod === 'upi' && !result.order.accepted ? 'Razorpay verified — ready to accept' : 'payment already recorded'
+          : status === 'partially_paid' ? 'paid partially' : status === 'loaned' ? 'loan recorded' : status === 'cancelled' ? 'order cancelled' : 'latest payment status shown'
+        toast(`Order updated: ${label}`)
+        return true
+      }
+      toast.success(`Payment recorded for ${order.customerName}`)
+      return true
+    } catch (err) {
+      toast.error(`Failed: ${err.message}`)
+      return false
+    } finally {
+      paymentRequests.current.delete(order.id)
+      setProcessing(p => ({ ...p, [order.id]: false }))
+    }
   }
 
-  const markAsPaid = async (order) => {
-    if (order.paymentId) return
+  const acceptPaidOrder = async (order) => {
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
-      await updateOrderStatus(order.id, 'paid')
-      toast.success(`Confirmed for ${order.customerName} — stock updated`)
+      await shopApi('accept', { orderId: order.id })
+      orderFeed.current.patch(order.id, { accepted: true })
+      invalidateProducts()
+      setHistoryRevision(value => value + 1)
+      toast.success(`Order accepted for ${order.customerName}`)
     } catch (err) {
+      console.error(err)
       toast.error(`Failed: ${err.message}`)
     }
     setProcessing(p => ({ ...p, [order.id]: false }))
-  }
-
-  const acceptRazorpayOrder = async (order) => {
-    if (!isCapturedRazorpayOrder(order) || order.acceptedAt || processing[order.id]) return
-    setProcessing(p => ({ ...p, [order.id]: true }))
-    try {
-      await updateOrderStatus(order.id, 'accept')
-      toast.success(`Accepted ${order.customerName}'s paid order`)
-    } catch (err) {
-      toast.error(`Could not accept order: ${err.message}`)
-    }
-    setProcessing(p => ({ ...p, [order.id]: false }))
-  }
-
-  const acceptAllVerifiedOrders = async () => {
-    const pending = visibleOrders.filter(order => isCapturedRazorpayOrder(order) && !order.acceptedAt)
-    if (!pending.length || !confirm(`Accept ${pending.length} verified Razorpay order${pending.length === 1 ? '' : 's'}?`)) return
-    setProcessing(current => ({ ...current, ...Object.fromEntries(pending.map(order => [order.id, true])) }))
-    let accepted = 0
-    for (const order of pending) {
-      try {
-        await updateOrderStatus(order.id, 'accept')
-        accepted += 1
-      } catch (error) {
-        toast.error(`Could not accept ${order.customerName}: ${error.message}`)
-      }
-    }
-    setProcessing(current => ({ ...current, ...Object.fromEntries(pending.map(order => [order.id, false])) }))
-    if (accepted) toast.success(`${accepted} verified order${accepted === 1 ? '' : 's'} accepted`)
   }
 
   const markAsCancelled = async (order) => {
     if (processing[order.id]) return
     setProcessing(p => ({ ...p, [order.id]: true }))
     try {
-      await updateOrderStatus(order.id, 'cancelled', 'admin')
+      await shopApi('reject', { orderId: order.id })
+      orderFeed.current.patch(order.id, { status: 'cancelled', cancelledBy: 'admin' })
+      invalidateProducts()
+      setHistoryRevision(value => value + 1)
       toast('Order rejected')
     } catch (err) {
       toast.error(`Failed: ${err.message}`)
@@ -603,62 +730,80 @@ export default function AdminPage() {
     setProcessing(p => ({ ...p, [order.id]: false }))
   }
 
-  // ── NEW: shared helper ──────────────────────────────────────────
-  // Releases any `reserved` stock an order is still holding, IF that
-  // order is still in an active/unsettled state (pending, utr_submitted,
-  // or draft). Paid/cancelled orders already had their reservation
-  // settled, so this is a no-op for them. This must run BEFORE the
-  // order doc is deleted — once deleted, there's no way to know what
-  // to release.
-  const deleteOrders = async (selected) => {
-    for (const order of selected.filter(o => !isCapturedRazorpayOrder(o))) await updateOrderStatus(order.id, 'delete')
+  const deleteOrder = async id => {
+    if (reportStatus !== 'ready') { toast.error('Finish monthly report setup before deleting history.'); return }
+    if (!confirm('Delete this completed order? Its saved monthly report will be kept.')) return
+    try { await shopApi('delete', { orderId: id }); setHistoryRevision(value => value + 1); toast.success('Order history deleted; report kept') }
+    catch (err) { toast.error(err.message) }
   }
 
-  const deleteOrder = async (order) => {
-    if (isCapturedRazorpayOrder(order)) {
-      if (!order.acceptedAt || !confirm('Remove this accepted Razorpay order from the admin list? Its payment record and sales total will be retained.')) return
-      try {
-        await updateDoc(doc(db, 'orders', order.id), { adminArchivedAt: serverTimestamp() })
-        toast.success('Order removed from admin list')
-      } catch (err) { toast.error('Could not remove order: ' + err.message) }
+  const deleteMonthOrders = async monthOrders => {
+    if (reportStatus !== 'ready') { toast.error('Finish monthly report setup before deleting history.'); return }
+    const history = monthOrders.filter(canDeleteHistory)
+    if (!history.length) return
+    if (!confirm(`Delete ${history.length} completed orders? Download the CSV first. Monthly reports, active orders and unpaid loans will be kept. This cannot be undone.`)) return
+    let deleted = 0
+    try {
+      for (let offset = 0; offset < history.length; offset += 50) {
+        const result = await shopApi('deleteHistory', { ids: history.slice(offset, offset + 50).map(order => order.id) })
+        deleted += result.deleted
+      }
+      toast.success(`${deleted} completed orders deleted; reports kept`)
+    } catch (err) { toast.error(`${deleted} deleted. ${err.message}`) }
+    finally { setHistoryRevision(value => value + 1) }
+  }
+
+  const acceptAllPaidOrders = async (visibleOrders = orders) => {
+    const pendingPaidOrders = visibleOrders.filter(
+      o => o.status === 'paid' && o.paymentMethod === 'upi' && !o.accepted
+    )
+
+    if (pendingPaidOrders.length === 0) {
+      toast('No verified orders waiting for acceptance')
       return
     }
-    if (!confirm('Delete this order permanently?')) return
+
+    if (!confirm(`Accept all ${pendingPaidOrders.length} verified Razorpay orders?`)) return
+
+    setProcessing(p => ({
+      ...p,
+      ...Object.fromEntries(pendingPaidOrders.map(o => [o.id, true]))
+    }))
+
     try {
-      await updateOrderStatus(order.id, 'delete')
-      toast.success('Order deleted')
-    } catch (err) { toast.error('Could not delete order: ' + err.message) }
+      invalidateProducts()
+      for (let offset = 0; offset < pendingPaidOrders.length; offset += 50) {
+        const result = await shopApi('acceptMany', { ids: pendingPaidOrders.slice(offset, offset + 50).map(order => order.id) })
+        result.acceptedIds.forEach(id => orderFeed.current.patch(id, { accepted: true }))
+      }
+      setHistoryRevision(value => value + 1)
+      toast.success(`${pendingPaidOrders.length} orders accepted`)
+    } catch (err) {
+      toast.error(`Failed: ${err.message}`)
+    }
+
+    setProcessing(p => {
+      const next = { ...p }
+      pendingPaidOrders.forEach(o => { delete next[o.id] })
+      return next
+    })
   }
 
-  const deleteMonthOrders = async (monthOrders) => {
-    if (!confirm('Delete all ' + monthOrders.length + ' orders in this month? This cannot be undone.')) return
-    try {
-      await deleteOrders(monthOrders)
-      toast.success(monthOrders.length + ' orders deleted')
-    } catch (err) { toast.error('Deletion stopped: ' + err.message) }
-  }
+  const deleteAllOrders = async () => deleteMonthOrders(orders)
 
-  const deleteAllOrders = async () => {
-    if (!confirm('DELETE ' + deletableOrders.length + ' NON-RAZORPAY ORDERS PERMANENTLY? This cannot be undone.')) return
-    if (!confirm('Are you absolutely sure? All order history will be lost.')) return
-    setDeletingAll(true)
-    try {
-      await deleteOrders(deletableOrders)
-      toast.success('Selected orders deleted')
-    } catch (err) { toast.error('Deletion stopped: ' + err.message) }
-    setDeletingAll(false)
-  }
 
   const saveEdit = async (id) => {
     try {
-      await updateDoc(doc(db, 'products', id), {
+      const patch = {
         name: editData.name,
         category: editData.category,
         price: Number(editData.price),
         stock: Number(editData.stock),
         stockMax: Number(editData.stockMax || editData.stock),
         imageUrl: editData.imageUrl || '',
-      })
+      }
+      await updateDoc(doc(db, 'products', id), patch)
+      setProducts(previous => previous.map(product => product.id === id ? { ...product, ...patch } : product))
       toast.success('Product updated')
       setEditingId(null)
     } catch (err) {
@@ -669,13 +814,14 @@ export default function AdminPage() {
   const deleteProduct = async (id) => {
     if (!confirm('Delete this product?')) return
     await deleteDoc(doc(db, 'products', id))
+    setProducts(previous => previous.filter(product => product.id !== id))
     toast.success('Deleted')
   }
 
   const addProduct = async () => {
     if (!newProduct.name || !newProduct.price || !newProduct.stock) { toast.error('Fill name, price and stock'); return }
     try {
-      await addDoc(collection(db, 'products'), {
+      const product = {
         name: newProduct.name.trim(),
         category: newProduct.category,
         price: Number(newProduct.price),
@@ -683,7 +829,9 @@ export default function AdminPage() {
         stockMax: Number(newProduct.stock),
         reserved: 0,
         imageUrl: newProduct.imageUrl || '',
-      })
+      }
+      const added = await addDoc(collection(db, 'products'), product)
+      setProducts(previous => [...previous, { id: added.id, ...product }])
       toast.success('Product added!')
       setAdding(false)
       setNewProduct({ name: '', category: 'chips', price: '', stock: '', imageUrl: '' })
@@ -696,6 +844,7 @@ export default function AdminPage() {
     const val = prompt('Set new stock quantity:')
     if (val === null || isNaN(Number(val))) return
     await updateDoc(doc(db, 'products', id), { stock: Number(val), stockMax: Number(val) })
+    setProducts(previous => previous.map(product => product.id === id ? { ...product, stock: Number(val), stockMax: Number(val) } : product))
     toast.success('Stock updated')
   }
 
@@ -704,7 +853,8 @@ export default function AdminPage() {
       await updateDoc(doc(db, 'requests', id), {
         status: newStatus,
         resolved: newStatus === 'completed',
-        ...(newStatus === 'completed' ? { completedAt: serverTimestamp() } : {}),
+        completedAt: newStatus === 'completed' ? serverTimestamp() : deleteField(),
+        customerSeenAt: deleteField(),
       })
       toast.success(`Request marked as ${REQUEST_STATUSES[newStatus]?.label}`)
     } catch (err) {
@@ -740,20 +890,34 @@ export default function AdminPage() {
     toast.success(`${monthRequests.length} requests deleted`)
   }
 
+  return <AdminView {...{ loadHistory, newOrders, orderView, setOrderView, orderLoadStatus, loadOrderView, productSearch, setProductSearch, productLoadStatus, loadProducts, reports, reportStatus, reportError, reportProgress, prepareReports, historyRevision, products, orders, requests, shopOpen, togglingShop, toggleShopStatus, handleLogout, tab, setTab, totalRevenue, pendingPayments, needsActionCount, pendingReqs, adding, setAdding, newProduct, setNewProduct, addProduct, editingId, editData, setEditData, saveEdit, setEditingId, restockProduct, deleteProduct, processing, markAsPaid, markAsCancelled, acceptPaidOrder, deleteOrder, deleteMonthOrders, deletingAll, acceptAllPaidOrders, deleteAllOrders, monthGroups, deletingAllRequests, deleteAllRequests, setRequestStatus, deleteRequest, deleteMonthRequests, requestMonthGroups }} />
+}
+
+export function AdminView({ onPreviewNewOrder, newOrders = [], orderView = 'new', setOrderView, orderLoadStatus = { pending: 'idle', history: 'idle', loans: 'idle' }, loadOrderView, productSearch = '', setProductSearch, productLoadStatus = 'ready', loadProducts, loadHistory, reports, reportStatus = 'ready', reportError, reportProgress, prepareReports, historyRevision, products, orders, requests, shopOpen, togglingShop, toggleShopStatus, handleLogout, tab, setTab, totalRevenue, pendingPayments, needsActionCount, pendingReqs, adding, setAdding, newProduct, setNewProduct, addProduct, editingId, editData, setEditData, saveEdit, setEditingId, restockProduct, deleteProduct, processing, markAsPaid, markAsCancelled, acceptPaidOrder, deleteOrder, deleteMonthOrders, deletingAll, acceptAllPaidOrders, deleteAllOrders, monthGroups, deletingAllRequests, deleteAllRequests, setRequestStatus, deleteRequest, deleteMonthRequests, requestMonthGroups, preview = false, financePreview }) {
+  const { theme, toggleTheme } = useThemePreference()
+  const loans = loanSummary(orders)
+  const outstandingOrders = orders.filter(order => outstandingAmount(order) > 0)
+  const recentOrders = useHistoryWindow(orders, ORDER_HISTORY_HOURS).filter(order => order.status !== 'draft')
+  const displayedOrders = orderView === 'new' ? newOrders.filter(isActiveOrder) : orderView === 'pending' && orderLoadStatus.pending === 'ready' ? orders.filter(isActiveOrder) : orderView === 'history' && orderLoadStatus.history === 'ready' ? recentOrders : []
+  const verifiedRecentOrders = newOrders.filter(order => order.status === 'paid' && order.paymentMethod === 'upi' && !order.accepted)
+  const normalizedProductSearch = productSearch.trim().toLowerCase()
+  const filteredProducts = productLoadStatus === 'ready'
+    ? products.filter(product => !normalizedProductSearch || [product.name, product.category, product.packSize]
+      .filter(Boolean)
+      .some(value => String(value).toLowerCase().includes(normalizedProductSearch)))
+      .sort((a, b) => (b.stock || 0) - (a.stock || 0) || (a.name || '').localeCompare(b.name || ''))
+    : []
   const tabs = [
     { id: 'products', label: 'Products', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
+    { id: 'loans', label: 'Loans', icon: Wallet },
     { id: 'requests', label: 'Requests', icon: MessageSquare },
     { id: 'finance', label: 'Finance', icon: Wallet },
   ]
 
-  const normalizedProductSearch = productSearch.trim().toLowerCase()
-  const filteredProducts = normalizedProductSearch
-    ? products.filter(product => [product.name, product.category].filter(Boolean).join(' ').toLowerCase().includes(normalizedProductSearch))
-    : products
-
   return (
-    <div className="admin-shell" data-theme={theme} style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <motion.div className="admin-shell" data-theme={theme} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.22 }} style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      {preview && <div className="preview-banner">LOCAL ADMIN PREVIEW <span>Sample data · changes stay in this browser</span><a href="/preview">View shop ↗</a></div>}
       <style>{`
         @keyframes badgePulse {
           0%, 100% { box-shadow: 0 0 0 0 rgba(255,159,67,0.55); }
@@ -772,19 +936,18 @@ export default function AdminPage() {
         }
       `}</style>
       <header className="admin-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 30 }}>
-        <div className="admin-header-inner" style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px', height: 58, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div className="admin-brand" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontFamily: 'Syne', fontWeight: 800, fontSize: 18 }}>SnackShop</span>
-            <span style={{ fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '2px 8px', borderRadius: 100, fontWeight: 600 }}>ADMIN</span>
+        <div style={{ maxWidth: 1180, margin: '0 auto', padding: '0 16px', height: 78, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <a className="store-brand" href={preview ? '/admin-preview' : '/admin/dashboard'}><span className="brand-stamp"><img src="/favicon.svg?v=4" alt="" aria-hidden="true" /></span>snackshop<span className="brand-period">.</span></a>
+            <span style={{ fontSize: 11, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '2px 8px', borderRadius: 100, fontWeight: 600 }}>BACK OFFICE</span>
           </div>
           <div className="admin-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <motion.button
               whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.95 }}
+              whileTap={press}
               onClick={toggleShopStatus}
               disabled={togglingShop}
-              aria-label={shopOpen ? 'Close shop for pickup' : 'Open shop for pickup'}
               style={{
                 background: shopOpen ? 'var(--success-dim)' : 'var(--danger-dim)',
                 border: `1px solid ${shopOpen ? 'rgba(46,204,113,0.3)' : 'rgba(255,92,92,0.3)'}`,
@@ -796,35 +959,43 @@ export default function AdminPage() {
               title="Toggle whether the shop shows as open for pickup"
             >
               {shopOpen ? <Store size={13} /> : <DoorClosed size={13} />}
-              <span className="admin-shop-label">{shopOpen ? 'Shop Open' : 'Shop Closed'}</span>
+              {shopOpen ? 'Shop Open' : 'Shop Closed'}
             </motion.button>
             <motion.button 
               whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.95 }}
+              whileTap={press}
               onClick={handleLogout} 
-              aria-label="Log out of admin"
               style={{ background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.2)', borderRadius: 8, padding: '6px 12px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}
             >
-              <LogOut size={13} /> <span className="admin-logout-label">Logout</span>
+              <LogOut size={13} /> {preview ? 'Reset demo' : 'Logout'}
             </motion.button>
           </div>
         </div>
       </header>
 
-      <div className="admin-main" style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
+      <main className="admin-main" style={{ maxWidth: 1180, margin: '0 auto', padding: '24px 16px' }}>
+        <div className="admin-intro"><div><span className="eyebrow">THE OTHER SIDE OF THE COUNTER</span><h1>A little shop. All in order.</h1><p>Keep the shelves stocked, the orders moving, and the next break sorted.</p></div><a href={preview ? '/preview' : '/'} className="admin-shop-link">Visit the shop ↗</a></div>
         {/* Stats Grid */}
+        {preview && <p className="admin-preview-note" role="status">This is the actual dashboard UI with sample data. All actions and image selections stay local; reload or reset to start again.</p>}
         <div className="admin-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 28 }}>
-          <StatCard label="Total products" value={products.length} />
-          <StatCard label="Paid orders" value={orders.filter(o => o.status === 'paid').length} color="var(--success)" />
-          <StatCard label="Revenue" value={`₹${totalRevenue}`} color="var(--accent)" maskable />
-          <StatCard label="Awaiting verify" value={pendingPayments} color={pendingPayments > 0 ? 'var(--warning)' : 'var(--text-secondary)'} />
+          <StatCard label="Total products" value={productLoadStatus === 'ready' ? products.length : '--'} />
+          <StatCard label="Paid orders" value={reports ? (reportStatus === 'ready' ? reports.reduce((sum, report) => sum + (report.paidCount || 0), 0) : 'Loading') : orders.filter(o => o.status === 'paid').length} color="var(--success)" />
+          <StatCard label="Revenue" value={reports && reportStatus !== 'ready' ? 'Loading' : money(totalRevenue)} color="var(--accent)" maskable />
+          <div className="admin-loan-summary">
+            <button className="loan-summary-link" onClick={() => setTab('loans')}>Loans <span>View balances ↗</span></button>
+            <div className="loan-summary-total">{orderLoadStatus.loans === 'ready' ? money(loans.total) : '--'}</div>
+            {orderLoadStatus.loans === 'ready' && <div className="loan-summary-breakdown">
+              <span className="loan-summary-partial">Partial <strong>{money(loans.partial)}</strong></span>
+              <span className="loan-summary-loaned">Loaned <strong>{money(loans.loaned)}</strong></span>
+            </div>}
+          </div>
         </div>
 
         {/* Dynamic Animated Tabs */}
-        <div className="admin-tabs" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <nav className="admin-tabs" aria-label="Dashboard sections" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           {tabs.map(t => (
-            <button 
-              key={t.id} 
+            <motion.button whileTap={press}
+              key={t.id} aria-current={tab === t.id ? 'page' : undefined}
               onClick={() => setTab(t.id)} 
               style={{ 
                 position: 'relative', 
@@ -851,6 +1022,7 @@ export default function AdminPage() {
                 />
               )}
               <t.icon size={13} /> {t.label}
+              {t.id === 'loans' && orderLoadStatus.loans === 'ready' && loans.count > 0 && <span className="loan-tab-count">{loans.count}</span>}
               {t.id === 'orders' && needsActionCount > 0 && (
                 <span className="admin-tab-badge" style={{ background: 'var(--warning)', color: 'white', borderRadius: 100, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
                   {needsActionCount}
@@ -861,21 +1033,48 @@ export default function AdminPage() {
                   {pendingReqs}
                 </span>
               )}
-            </button>
+            </motion.button>
           ))}
-        </div>
+        </nav>
 
         {/* ── PRODUCTS TAB ── */}
         {tab === 'products' && (
           <div>
-            <div className="admin-products-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+            <div className="admin-products-toolbar">
               <div>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{filteredProducts.length === products.length ? products.length : `${filteredProducts.length} of ${products.length}`} product{products.length !== 1 ? 's' : ''} in inventory</p>
-                <label className="admin-product-search"><Search size={16} /><input type="search" value={productSearch} onChange={event => setProductSearch(event.target.value)} placeholder="Search products" aria-label="Search products" />{productSearch && <button type="button" onClick={() => setProductSearch('')} aria-label="Clear product search"><X size={15} /></button>}</label>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                  {productLoadStatus === 'loading' || productLoadStatus === 'idle'
+                    ? 'Loading products...'
+                    : productLoadStatus === 'error' ? 'Could not load products.'
+                    : normalizedProductSearch ? `${filteredProducts.length} matching products` : `${products.length} products`}
+                </p>
+                <label className="admin-product-search">
+                  <Search size={16} aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={productSearch}
+                    onChange={event => setProductSearch(event.target.value)}
+                    placeholder="Search products or categories"
+                    aria-label="Search admin products"
+                  />
+                  {productSearch && (
+                    <motion.button
+                      className="icon-button icon-button--compact"
+                      type="button"
+                      whileTap={press}
+                      onClick={() => setProductSearch('')}
+                      aria-label="Clear product search"
+                    >
+                      <X size={15} />
+                    </motion.button>
+                  )}
+                </label>
               </div>
+              {loadProducts && <button className="monthly-report-button" disabled={productLoadStatus === 'loading'} onClick={() => loadProducts(true)}><RefreshCw size={14} /> Refresh products</button>}
               <motion.button 
+                className="admin-add-product-button"
                 whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.96 }}
+                whileTap={press}
                 onClick={() => setAdding(a => !a)} 
                 style={{ padding: '9px 18px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 10, fontFamily: 'Syne', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
               >
@@ -893,7 +1092,7 @@ export default function AdminPage() {
                 >
                   <p style={{ fontFamily: 'Syne', fontWeight: 700, marginBottom: 14, fontSize: 14, color: 'var(--accent)' }}>New product</p>
                   <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                    <ImageUploader currentUrl={newProduct.imageUrl} productId={`new_${Date.now()}`} onUploaded={url => setNewProduct(p => ({ ...p, imageUrl: url }))} />
+                    <ImageUploader preview={preview} currentUrl={newProduct.imageUrl} productId={`new_${Date.now()}`} onUploaded={url => setNewProduct(p => ({ ...p, imageUrl: url }))} />
                     <div className="admin-product-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, flex: 1, minWidth: 260 }}>
                       <input value={newProduct.name} onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))} placeholder="Product name *" />
                       <select value={newProduct.category} onChange={e => setNewProduct(p => ({ ...p, category: e.target.value }))}>
@@ -904,22 +1103,30 @@ export default function AdminPage() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                    <motion.button whileTap={{ scale: 0.95 }} onClick={addProduct} style={{ padding: '9px 22px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 8, fontFamily: 'Syne', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <motion.button whileTap={press} onClick={addProduct} style={{ padding: '9px 22px', background: 'var(--accent)', color: 'var(--accent-text)', border: 'none', borderRadius: 8, fontFamily: 'Syne', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
                       <Check size={13} /> Save product
                     </motion.button>
-                    <button onClick={() => setAdding(false)} style={{ padding: '9px 14px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+                    <motion.button whileTap={press} onClick={() => setAdding(false)} style={{ padding: '9px 14px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer' }}>Cancel</motion.button>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-              {products.length === 0 && (
+              {(productLoadStatus === 'loading' || productLoadStatus === 'idle') && <div className="admin-search-empty" role="status">Loading products...</div>}
+              {productLoadStatus === 'error' && <div className="admin-search-empty" role="alert"><p>Could not load products.</p><button onClick={() => loadProducts(true)}>Retry</button></div>}
+              {productLoadStatus === 'ready' && products.length === 0 && (
                 <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14 }}>
                   No products yet — click "Add product" to get started
                 </div>
               )}
-              {products.length > 0 && filteredProducts.length === 0 && <div className="admin-search-empty"><Search size={23} /><p>No products match “{productSearch.trim()}”</p><button onClick={() => setProductSearch('')}>Clear search</button></div>}
+              {normalizedProductSearch && productLoadStatus === 'ready' && products.length > 0 && filteredProducts.length === 0 && (
+                <div className="admin-search-empty">
+                  <Search size={22} aria-hidden="true" />
+                  <p>No products match “{productSearch.trim()}”</p>
+                  <button type="button" onClick={() => setProductSearch('')}>Clear search</button>
+                </div>
+              )}
               <AnimatePresence>
                 {filteredProducts.map((p, i) => (
                   <motion.div 
@@ -932,7 +1139,7 @@ export default function AdminPage() {
                   >
                     {editingId === p.id ? (
                       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                        <ImageUploader currentUrl={editData.imageUrl} productId={p.id} onUploaded={url => setEditData(d => ({ ...d, imageUrl: url }))} />
+                        <ImageUploader preview={preview} currentUrl={editData.imageUrl} productId={p.id} onUploaded={url => setEditData(d => ({ ...d, imageUrl: url }))} />
                         <div className="admin-product-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8, flex: 1 }}>
                           <input value={editData.name || ''} onChange={e => setEditData(d => ({ ...d, name: e.target.value }))} style={{ fontSize: 13 }} placeholder="Name" />
                           <select value={editData.category || 'chips'} onChange={e => setEditData(d => ({ ...d, category: e.target.value }))}>
@@ -942,27 +1149,27 @@ export default function AdminPage() {
                           <input type="number" className="no-spinner" value={editData.stock || ''} onChange={e => setEditData(d => ({ ...d, stock: e.target.value }))} placeholder="Stock" />
                         </div>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <button onClick={() => saveEdit(p.id)} style={{ background: 'var(--success)', border: 'none', borderRadius: 8, padding: '8px 16px', color: 'white', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><Check size={13} /> Save</button>
-                          <button onClick={() => setEditingId(null)} style={{ background: 'var(--surface2)', border: 'none', borderRadius: 6, padding: '8px 10px', color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}><X size={14} /></button>
+                          <motion.button whileTap={press} onClick={() => saveEdit(p.id)} style={{ background: 'var(--success)', border: 'none', borderRadius: 8, padding: '8px 16px', color: 'white', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><Check size={13} /> Save</motion.button>
+                          <motion.button className="icon-button icon-button--compact" whileTap={press} aria-label={`Cancel editing ${p.name}`} onClick={() => setEditingId(null)} style={{ background: 'var(--surface2)', border: 'none', borderRadius: 6, padding: '8px 10px', color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}><X size={14} /></motion.button>
                         </div>
                       </div>
                     ) : (
-                      <div className="admin-product-row" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div className="admin-inventory-row" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style={{ width: 52, height: 52, borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {p.imageUrl ? <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} /> : <NoImagePlaceholder small />}
+                          {p.imageUrl || p.image ? <img src={p.imageUrl || p.image} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none' }} /> : <NoImagePlaceholder small />}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
                           <div style={{ fontSize: 11, color: 'var(--text-hint)', textTransform: 'capitalize' }}>{p.category}</div>
                         </div>
-                        <div className="admin-product-price" style={{ fontFamily: 'Syne', fontWeight: 700, color: 'var(--accent)', minWidth: 50, textAlign: 'right' }}>₹{p.price}</div>
-                        <span className="admin-product-stock stock-availability-badge" style={{ padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, minWidth: 64, textAlign: 'center', color: p.stock === 0 ? 'var(--danger)' : p.stock <= 4 ? 'var(--warning)' : 'var(--success)' }}>
+                        <div style={{ fontFamily: 'Syne', fontWeight: 700, color: 'var(--accent)', minWidth: 50, textAlign: 'right' }}>₹{p.price}</div>
+                        <span style={{ padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, minWidth: 64, textAlign: 'center', background: p.stock === 0 ? 'var(--danger-dim)' : p.stock <= 3 ? 'var(--warning-dim)' : 'var(--success-dim)', color: p.stock === 0 ? 'var(--danger)' : p.stock <= 3 ? 'var(--warning)' : 'var(--success)' }}>
                           {p.stock} left
                         </span>
-                        <div className="admin-product-actions" style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={() => restockProduct(p.id)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>Restock</button>
-                          <button onClick={() => { setEditingId(p.id); setEditData({ ...p }) }} aria-label={`Edit ${p.name}`} style={{ background: 'var(--surface2)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}><Edit2 size={13} /></button>
-                          <button onClick={() => deleteProduct(p.id)} aria-label={`Delete ${p.name}`} style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--danger)', display: 'flex', cursor: 'pointer' }}><Trash2 size={13} /></button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <motion.button whileTap={press} onClick={() => restockProduct(p.id)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>Restock</motion.button>
+                          <motion.button className="icon-button icon-button--compact" whileTap={press} aria-label={`Edit ${p.name}`} onClick={() => { setEditingId(p.id); setEditData({ ...p }) }} style={{ background: 'var(--surface2)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--text-secondary)', display: 'flex', cursor: 'pointer' }}><Edit2 size={13} /></motion.button>
+                          <motion.button className="icon-button icon-button--compact" whileTap={press} aria-label={`Delete ${p.name}`} onClick={() => deleteProduct(p.id)} style={{ background: 'var(--danger-dim)', border: 'none', borderRadius: 6, padding: 6, color: 'var(--danger)', display: 'flex', cursor: 'pointer' }}><Trash2 size={13} /></motion.button>
                         </div>
                       </div>
                     )}
@@ -976,43 +1183,47 @@ export default function AdminPage() {
         {/* ── ORDERS TAB ── */}
         {tab === 'orders' && (
           <div>
-            {visibleOrders.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14, background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>No orders yet</div>
+            <div className="admin-order-views">
+              {preview && onPreviewNewOrder && <button className="monthly-report-button" onClick={onPreviewNewOrder}><Plus size={14} /> Simulate new order</button>}
+              <button className="monthly-report-button" aria-pressed={orderView === 'new'} onClick={() => setOrderView('new')}>New incoming{newOrders.length > 0 ? ` (${newOrders.length})` : ''}</button>
+              <button className="monthly-report-button" aria-pressed={orderView === 'history'} onClick={() => loadOrderView('history')}>Show past 24 hours</button>
+              {orderView !== 'new' && <button className="monthly-report-button" disabled={orderLoadStatus[orderView] === 'loading'} onClick={() => loadOrderView(orderView, true)}><RefreshCw size={14} /> Refresh</button>}
+            </div>
+            {newOrders.length > 0 && <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                <button className="monthly-report-button" onClick={() => acceptAllPaidOrders(newOrders)} disabled={verifiedRecentOrders.length === 0}>
+                  <Check size={13} /> {`Accept verified (${verifiedRecentOrders.length})`}
+                </button>
+              </div>
+              <MonthGroup keepOpen label="Orders awaiting your action" orders={newOrders} processing={processing} onMarkPaid={markAsPaid} onReject={markAsCancelled} onAcceptPaid={acceptPaidOrder} />
+            </>}
+            {orderView === 'new' ? (newOrders.length === 0 && <div className="loans-empty">No orders awaiting action. New orders will appear here automatically.</div>)
+              : orderLoadStatus[orderView] === 'loading' ? <div className="loans-empty" role="status">Loading orders...</div>
+              : orderView !== 'new' && orderLoadStatus[orderView] === 'error' ? <div className="loans-empty" role="alert">Could not load orders. Use Refresh to try again.</div>
+              : displayedOrders.length === 0 ? (
+              <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-hint)', fontSize: 14, background: 'var(--surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>{orderView === 'new' ? 'Waiting for new orders. Choose a view above to load existing orders.' : orderView === 'pending' ? 'No pending orders.' : 'No orders in the last 24 hours.'}</div>
             ) : (
               <>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                  {awaitingAcceptance > 0 && <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={acceptAllVerifiedOrders}
-                    style={{ padding: '8px 16px', background: 'var(--success)', border: 'none', borderRadius: 8, color: 'white', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
-                  ><Check size={13} /> Accept verified ({awaitingAcceptance})</motion.button>}
-                  {deletableOrders.length > 0 &&
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={deleteAllOrders}
-                    disabled={deletingAll}
-                    style={{ padding: '8px 16px', background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.25)', borderRadius: 8, color: 'var(--danger)', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, cursor: deletingAll ? 'not-allowed' : 'pointer', opacity: deletingAll ? 0.6 : 1 }}
-                  >
-                    <Trash2 size={13} /> {deletingAll ? 'Deleting...' : `Delete non-Razorpay orders (${deletableOrders.length})`}
-                  </motion.button>}
-                </div>
-                {Object.entries(monthGroups).map(([label, monthOrders]) => (
-                  <MonthGroup
-                    key={label}
-                    label={label}
-                    orders={monthOrders}
-                    processing={processing}
-                    onMarkPaid={markAsPaid}
-                    onAccept={acceptRazorpayOrder}
-                    onReject={markAsCancelled}
-                    onDelete={deleteOrder}
-                    onDeleteAll={deleteMonthOrders}
-                  />
-                ))}
+                <MonthGroup key={orderView} label={orderView === 'new' ? 'New incoming orders' : orderView === 'pending' ? 'Pending orders' : 'All orders (last 24 hours)'} orders={displayedOrders} processing={processing} onMarkPaid={markAsPaid} onReject={markAsCancelled} onAcceptPaid={acceptPaidOrder} />
               </>
             )}
           </div>
         )}
+
+        {tab === 'orders' && reports && <section>
+          <div className="monthly-reports-toolbar"><div><h2>Monthly history</h2><p>Open a month to view its full order list.</p></div><button className="monthly-report-button" disabled={reportStatus !== 'ready' || !reports.length} onClick={() => downloadMonthlyCsv(reports)}><Download size={14} /> Download monthly CSV</button></div>
+          {reportStatus !== 'ready' && <div className="monthly-report-setup" role="status"><strong>Monthly report setup</strong><p>{reportStatus === 'error' ? reportError : `Preparing saved summaries (${reportProgress || 0} records processed). This runs once.`}</p>{reportStatus === 'error' && <button className="monthly-report-button" onClick={prepareReports}>Retry setup</button>}</div>}
+          {reports.map(report => <MonthlyHistory key={report.month} report={report} loadHistory={loadHistory} liveOrders={orders} reportsReady={reportStatus === 'ready'} processing={processing} onMarkPaid={markAsPaid} onReject={markAsCancelled} onAcceptPaid={acceptPaidOrder} />)}
+        </section>}
+
+        {tab === 'loans' && <section className="admin-loans-section">
+          <div className="loans-heading"><div><h2>Outstanding loans</h2><p>Record cash received to update revenue and clear balances.</p></div>{orderLoadStatus.loans === 'ready' && <strong>{money(loans.total)} owed</strong>}</div>
+          <div className="admin-order-views"><button className="monthly-report-button" disabled={orderLoadStatus.loans === 'loading'} onClick={() => loadOrderView('loans', orderLoadStatus.loans === 'ready')}><Wallet size={14} /> {orderLoadStatus.loans === 'ready' ? 'Refresh loans' : 'Show unpaid loans'}</button></div>
+          {orderLoadStatus.loans === 'idle' ? <div className="loans-empty">Choose Show unpaid loans to load outstanding balances.</div>
+            : orderLoadStatus.loans === 'loading' ? <div className="loans-empty" role="status">Loading loans...</div>
+            : orderLoadStatus.loans === 'error' ? <div className="loans-empty" role="alert">Could not load loans. Try again.</div>
+            : outstandingOrders.length ? <MonthGroup label="All outstanding balances" orders={outstandingOrders} processing={processing} onMarkPaid={markAsPaid} onReject={markAsCancelled} onAcceptPaid={acceptPaidOrder} /> : <div className="loans-empty">All clear — no outstanding balances.</div>}
+        </section>}
 
         {/* ── REQUESTS TAB ── */}
         {tab === 'requests' && (
@@ -1023,7 +1234,7 @@ export default function AdminPage() {
                   {requests.length} request{requests.length !== 1 ? 's' : ''} · {pendingReqs} open
                 </p>
                 <motion.button
-                  whileTap={{ scale: 0.95 }}
+                  whileTap={press}
                   onClick={deleteAllRequests}
                   disabled={deletingAllRequests}
                   style={{ padding: '7px 14px', background: 'var(--danger-dim)', border: '1px solid rgba(255,92,92,0.25)', borderRadius: 8, color: 'var(--danger)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', opacity: deletingAllRequests ? 0.6 : 1 }}
@@ -1051,8 +1262,11 @@ export default function AdminPage() {
         )}
 
         {/* ── FINANCE TAB ── */}
-        {tab === 'finance' && <Ledger orders={orders} />}
-      </div>
-    </div>
+        {tab === 'finance' && (reportStatus !== 'ready'
+          ? <div className="monthly-report-setup" role="status"><strong>Monthly report setup</strong><p>{reportStatus === 'error' ? reportError : `Preparing saved summaries (${reportProgress || 0} records processed). This runs once.`}</p>{reportStatus === 'error' && <button className="monthly-report-button" onClick={prepareReports}>Retry setup</button>}</div>
+          : preview ? financePreview : <Ledger orders={orders} reports={reports} reportsReady />)}
+        <footer className="store-footer"><span className="footer-wordmark">snackshop.</span><span>Behind every good break, a well-stocked shelf.</span></footer>
+      </main>
+    </motion.div>
   )
 }
