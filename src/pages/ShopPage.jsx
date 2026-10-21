@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ShoppingBag, ArrowRight } from 'lucide-react'
+import { ShoppingBag, ArrowRight, ChevronDown } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { signOut } from 'firebase/auth'
 import { doc, onSnapshot } from 'firebase/firestore'
@@ -18,6 +19,7 @@ import ProfileMenu from '../components/ProfileMenu'
 import HeaderSearch from '../components/HeaderSearch'
 import useThemePreference from '../lib/useThemePreference'
 import useRequestUpdateBadge from '../lib/useRequestUpdateBadge'
+import { shopApi } from '../lib/shopApi'
 
 const categories = ['all', 'chips', 'biscuits', 'sweets', 'namkeen', 'noodles', 'drinks']
 
@@ -47,11 +49,12 @@ const productMatchesSearch = (product, query) => {
     || normalizedQuery.split(' ').every(token => searchable.includes(token) || compactSearchable.includes(token))
 }
 
-function ShopView({ products, loading = false, error, displayName = 'friend', shopOpen = true, onLogout, requestUpdateCount = 0, onRequestHistoryOpen, onOrderPlaced }) {
+export function ShopView({ products, loading = false, error, soldOutProducts = [], soldOutLoading = false, soldOutError, showSoldOut = false, setShowSoldOut, tab = 'all', setTab, displayName = 'friend', shopOpen = true, onLogout, requestUpdateCount = 0, onRequestHistoryOpen, onOrderPlaced }) {
   const { theme, toggleTheme } = useThemePreference()
   const reduceMotion = useReducedMotion()
-  const { totalItems, items } = useCart()
-  const [tab, setTab] = useState('all')
+  const { totalItems, items, storedProducts } = useCart()
+  const [restockStatuses, setRestockStatuses] = useState({})
+  const restockBusy = useRef(new Set())
   const [query, setQuery] = useState('')
   const [cartOpen, setCartOpen] = useState(false)
   const [profileRequestSignal, setProfileRequestSignal] = useState(0)
@@ -59,7 +62,9 @@ function ShopView({ products, loading = false, error, displayName = 'friend', sh
   const productsGridRef = useRef(null)
   const hasSearchQuery = Boolean(normalizeSearchValue(query))
   const filtered = products.filter(p => (hasSearchQuery || tab === 'all' || p.category === tab) && productMatchesSearch(p, query))
-  const cartProducts = products.filter(p => items[p.id])
+  const filteredSoldOut = soldOutProducts.filter(p => (tab === 'all' || p.category === tab) && productMatchesSearch(p, query))
+  // Retain cart lines when a live stock query removes a newly sold-out product.
+  const cartProducts = Object.keys(items).map(id => products.find(p => p.id === id) || (storedProducts[id] && { ...storedProducts[id], stock: 0, visibleStock: 0 })).filter(Boolean)
   const total = cartProducts.reduce((sum, p) => sum + p.price * items[p.id], 0)
 
   const showFirstSearchResult = useCallback(() => {
@@ -75,6 +80,20 @@ function ShopView({ products, loading = false, error, displayName = 'friend', sh
   const openRequestComposer = () => {
     setRequestDraft(query.trim())
     setProfileRequestSignal(value => value + 1)
+  }
+
+  const requestRestock = async product => {
+    if (restockBusy.current.has(product.id) || restockStatuses[product.id] === 'sent') return
+    restockBusy.current.add(product.id)
+    setRestockStatuses(previous => ({ ...previous, [product.id]: 'sending' }))
+    try {
+      const result = await shopApi('requestRestock', { productId: product.id, customerName: displayName })
+      setRestockStatuses(previous => ({ ...previous, [product.id]: 'sent' }))
+      toast.success(result.alreadyRequested ? 'You already requested this restock.' : `Restock request sent for ${product.name}.`)
+    } catch (err) {
+      setRestockStatuses(previous => ({ ...previous, [product.id]: 'idle' }))
+      toast.error(err.message)
+    } finally { restockBusy.current.delete(product.id) }
   }
 
   return (
@@ -116,6 +135,20 @@ function ShopView({ products, loading = false, error, displayName = 'friend', sh
             {loading ? <>{Array.from({ length: 8 }, (_, i) => <ProductSkeleton key={i} />)}<span className="sr-only" role="status">Loading snacks…</span></> : <AnimatePresence initial={false} mode="popLayout">{filtered.map(p => <motion.div key={p.id} data-search-result layout="position" {...reveal} style={{ minWidth: 0 }}><ProductCard product={p} /></motion.div>)}</AnimatePresence>}
           </div>
           {!loading && !error && filtered.length === 0 && <div className="catalog-empty"><h3>No snacks found.</h3><p>Try another name or request it from the shop.</p><div className="catalog-empty-actions">{query.trim() && <motion.button className="catalog-request-button" whileTap={press} onClick={openRequestComposer}>Request “{query.trim()}”</motion.button>}<motion.button whileTap={press} onClick={() => { setQuery(''); setTab('all') }}>Show everything</motion.button></div></div>}
+          <div className="sold-out-section">
+            <motion.button type="button" className="sold-out-toggle" whileTap={press} aria-expanded={showSoldOut} aria-controls="sold-out-products" onClick={() => setShowSoldOut(value => !value)}>
+              {showSoldOut ? 'Hide out-of-stock items' : 'Show out-of-stock items'}{tab !== 'all' ? ` in ${tab}` : ''}<ChevronDown size={16} style={{ transform: showSoldOut ? 'rotate(180deg)' : undefined }} aria-hidden="true" />
+            </motion.button>
+            {showSoldOut && <section id="sold-out-products" aria-label="Out-of-stock snacks" className="sold-out-catalog">
+              <div className="sold-out-heading"><h3>Out of stock{tab !== 'all' ? ` · ${tab.charAt(0).toUpperCase() + tab.slice(1)}` : ''}</h3><p>Missing a favourite? Request a restock from the shop.</p></div>
+              {soldOutError ? <p className="shop-notice" role="alert">We couldn't load out-of-stock items. Hide and reopen this section to try again.</p> : <>
+                <div className="products-grid" aria-busy={soldOutLoading}>
+                  {soldOutLoading ? <><ProductSkeleton /><ProductSkeleton /><span className="sr-only" role="status">Loading out-of-stock snacks…</span></> : filteredSoldOut.map(p => <ProductCard key={p.id} product={p} onRequestRestock={requestRestock} restockStatus={restockStatuses[p.id]} />)}
+                </div>
+                {!soldOutLoading && filteredSoldOut.length === 0 && <p className="sold-out-empty" role="status">{hasSearchQuery ? 'No out-of-stock items match your search in this section.' : 'No out-of-stock items in this section.'}</p>}
+              </>}
+            </section>}
+          </div>
         </section>
         <footer className="store-footer"><span className="footer-wordmark">snackshop.</span><span>A small shop for your everyday breaks.</span><span>Built by Abhinav.</span></footer>
       </main>
@@ -142,13 +175,15 @@ function ShopView({ products, loading = false, error, displayName = 'friend', sh
           </motion.button>}
         </AnimatePresence>
       </div>
-      <CartDrawer onOrderPlaced={onOrderPlaced} products={products} shopOpen={shopOpen} open={cartOpen} onClose={() => setCartOpen(false)} />
+      <CartDrawer onOrderPlaced={onOrderPlaced} products={cartProducts} shopOpen={shopOpen} open={cartOpen} onClose={() => setCartOpen(false)} />
     </motion.div>
   )
 }
 
 function LiveShop() {
-  const { products, loading, error, refreshProducts } = useProducts()
+  const [tab, setTab] = useState('all')
+  const [showSoldOut, setShowSoldOut] = useState(false)
+  const { products, loading, error, refreshProducts, soldOutProducts, soldOutLoading, soldOutError } = useProducts({ includeSoldOut: showSoldOut, category: tab })
   const { profile, user } = useAuth()
   const [shopOpen, setShopOpen] = useState(true)
   const { unreadCount, markRequestUpdatesRead } = useRequestUpdateBadge(user?.uid)
@@ -156,7 +191,7 @@ function LiveShop() {
     const unsub = onSnapshot(doc(db, 'settings', 'shopStatus'), snap => setShopOpen(snap.exists() ? snap.data().open !== false : true), err => console.error('Shop status error:', err))
     return unsub
   }, [])
-  return <ShopView onOrderPlaced={refreshProducts} products={products} loading={loading} error={error} shopOpen={shopOpen} displayName={profile?.name || user?.displayName || user?.email?.split('@')[0] || 'friend'} onLogout={() => signOut(auth)} requestUpdateCount={unreadCount} onRequestHistoryOpen={markRequestUpdatesRead} />
+  return <ShopView tab={tab} setTab={setTab} showSoldOut={showSoldOut} setShowSoldOut={setShowSoldOut} soldOutProducts={soldOutProducts} soldOutLoading={soldOutLoading} soldOutError={soldOutError} onOrderPlaced={refreshProducts} products={products} loading={loading} error={error} shopOpen={shopOpen} displayName={profile?.name || user?.displayName || user?.email?.split('@')[0] || 'friend'} onLogout={() => signOut(auth)} requestUpdateCount={unreadCount} onRequestHistoryOpen={markRequestUpdatesRead} />
 }
 
 export default function ShopPage() {

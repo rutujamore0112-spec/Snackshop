@@ -8,6 +8,9 @@ SnackShop is designed for high-speed, high-concurrency environments (like a busy
 
 ### Customer Experience
 * **Live Inventory:** Stock updates instantly across all active clients.
+* **In-stock Shelves:** The customer catalog listens only to products with physical stock remaining. Out-of-stock items load on demand using **Show out-of-stock items**, scoped to the selected category. Closing the section stops its listener. This reduces default product reads; opening the section, reconnecting, and live updates still incur normal Firestore reads.
+* **Pending Cash Reservations:** A reserved last unit stays on the main shelves as **Reserved — awaiting confirmation**. It cannot be ordered again while reserved. Cancellation releases it; admin acceptance (full payment, partial payment, or loan) deducts it and moves it to the out-of-stock section.
+* **Restock Requests:** Out-of-stock cards include a small **Request** button. Authenticated, deduplicated requests appear in the existing admin Requests inbox and notify an open dashboard. Customers can follow progress through request history.
 * **Smart Cart Reservations:** Adding an item to the cart temporarily reserves it using Firebase transactions. If checkout isn't completed within the 2-minute timer, the stock is automatically released back to the pool.
 * **Express Checkout:** Pay online through Razorpay or with cash on pickup.
 * **Google Authentication:** Frictionless login using Firebase Auth.
@@ -78,6 +81,8 @@ Run `npm run dev` for local development. Customer sign-in is required for `/`,
 and administrator access is required for `/admin/dashboard`.
 
 Verify the production frontend with `npm run build`.
+
+Run `node --test tests/*.test.mjs` to verify stock reservation/acceptance, restock requests, catalog queries, and cancelled-order cleanup. Deploy the product category/stock index with `firebase deploy --only firestore:indexes` before deploying the updated customer catalog.
 
 ### Automatic cancelled-order cleanup
 
