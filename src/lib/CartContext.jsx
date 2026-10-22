@@ -4,8 +4,10 @@ const CartContext = createContext(null)
 
 export function CartProvider({ children }) {
   const [items, setItems] = useState({})
+  const [storedProducts, setStoredProducts] = useState({})
 
   const addToCart = useCallback((product, qty) => {
+    setStoredProducts(prev => ({ ...prev, [product.id]: product }))
     setItems(prev => ({ ...prev, [product.id]: (prev[product.id] || 0) + qty }))
   }, [])
 
@@ -29,7 +31,7 @@ export function CartProvider({ children }) {
   const totalItems = Object.values(items).reduce((s, v) => s + v, 0)
 
   return (
-    <CartContext.Provider value={{ items, addToCart, decrementFromCart, removeFromCart, clearCart, totalItems }}>
+    <CartContext.Provider value={{ items, storedProducts, addToCart, decrementFromCart, removeFromCart, clearCart, totalItems }}>
       {children}
     </CartContext.Provider>
   )

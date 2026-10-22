@@ -426,6 +426,7 @@ function RequestMonthGroup({ label, requests, onSetStatus, onDelete, onDeleteAll
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, fontSize: 14 }}>{r.customerName}</span>
                         <RequestStatusBadge status={status} />
+                        {r.type === 'restock' && <span className="restock-request-label">Restock request</span>}
                       </div>
                       <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>{r.message}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r.createdAt?.toDate?.()?.toLocaleString('en-IN') || '—'}</div>
@@ -596,9 +597,19 @@ export default function AdminPage() {
       setReports(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.month.localeCompare(a.month)))
     }, err => { setReportStatus('error'); setReportError(err.message) })
 
+    let previousRequests = null
     const rUnsub = onSnapshot(
       query(collection(db, 'requests'), orderBy('createdAt', 'desc')),
-      snap => setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      snap => {
+        const current = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        if (previousRequests) for (const request of current) {
+          if (request.type === 'restock' && request.status === 'pending' && previousRequests.get(request.id) !== 'pending') {
+            toast(`Restock requested: ${request.productName || request.message}`, { duration: 6000 })
+          }
+        }
+        previousRequests = new Map(current.map(request => [request.id, request.status]))
+        setRequests(current)
+      },
       err => console.error('Requests error:', err)
     )
 
