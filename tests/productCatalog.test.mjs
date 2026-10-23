@@ -12,13 +12,12 @@ const user = { uid: 'customer', name: 'Customer' }
 const product = { name: 'Chips', category: 'chips', stock: 1, reserved: 0, price: 20 }
 const create = { orderId: 'last-unit', items: [{ productId: 'snack', qty: 1 }] }
 
-test('default query excludes sold-out documents; requested categories are filtered on the server', async () => {
+test('the shelf query stays small; opening sold-out items loads the full catalog', async () => {
   const app = initializeApp({ projectId: 'catalog-query-test', apiKey: 'test', appId: 'test' }, 'catalog-query-test')
   try {
     const db = getFirestore(app), products = collection(db, 'products')
     assert.ok(queryEqual(inventoryQuery(db), query(products, where('stock', '>', 0))))
-    assert.ok(queryEqual(inventoryQuery(db, { soldOut: true }), query(products, where('stock', '<=', 0))))
-    assert.ok(queryEqual(inventoryQuery(db, { soldOut: true, category: 'chips' }), query(products, where('stock', '<=', 0), where('category', '==', 'chips'))))
+    assert.ok(queryEqual(inventoryQuery(db, { soldOut: true }), query(products)))
   } finally { await deleteApp(app) }
 })
 

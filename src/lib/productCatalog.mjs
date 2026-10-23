@@ -13,8 +13,11 @@ export const sortProducts = products => [...products].sort((a, b) =>
   (a.category || '').localeCompare(b.category || '') || (a.name || '').localeCompare(b.name || '')
 )
 
-export function inventoryQuery(db, { soldOut = false, category = 'all' } = {}) {
-  const constraints = [where('stock', soldOut ? '<=' : '>', 0)]
-  if (soldOut && category !== 'all') constraints.push(where('category', '==', category))
-  return query(collection(db, 'products'), ...constraints)
+export function inventoryQuery(db, { soldOut = false } = {}) {
+  // Load the full catalog only when the customer opens the sold-out section.
+  // Filter zero-stock products locally so the section does not depend on a
+  // separate range query or a category/stock composite index.
+  return soldOut
+    ? query(collection(db, 'products'))
+    : query(collection(db, 'products'), where('stock', '>', 0))
 }

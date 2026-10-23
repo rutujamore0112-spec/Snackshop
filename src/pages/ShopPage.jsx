@@ -60,6 +60,7 @@ export function ShopView({ products, loading = false, error, soldOutProducts = [
   const [profileRequestSignal, setProfileRequestSignal] = useState(0)
   const [requestDraft, setRequestDraft] = useState('')
   const productsGridRef = useRef(null)
+  const soldOutSectionRef = useRef(null)
   const hasSearchQuery = Boolean(normalizeSearchValue(query))
   const filtered = products.filter(p => (hasSearchQuery || tab === 'all' || p.category === tab) && productMatchesSearch(p, query))
   const filteredSoldOut = soldOutProducts.filter(p => (tab === 'all' || p.category === tab) && productMatchesSearch(p, query))
@@ -76,6 +77,14 @@ export function ShopView({ products, loading = false, error, soldOutProducts = [
     const followTimer = window.setTimeout(showFirstSearchResult, 260)
     return () => window.clearTimeout(followTimer)
   }, [query, hasSearchQuery, loading, filtered.length, showFirstSearchResult])
+
+  useEffect(() => {
+    if (!showSoldOut) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      soldOutSectionRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [showSoldOut, reduceMotion])
 
   const openRequestComposer = () => {
     setRequestDraft(query.trim())
@@ -139,13 +148,13 @@ export function ShopView({ products, loading = false, error, soldOutProducts = [
             <motion.button type="button" className="sold-out-toggle" whileTap={press} aria-expanded={showSoldOut} aria-controls="sold-out-products" onClick={() => setShowSoldOut(value => !value)}>
               {showSoldOut ? 'Hide out-of-stock items' : 'Show out-of-stock items'}{tab !== 'all' ? ` in ${tab}` : ''}<ChevronDown size={16} style={{ transform: showSoldOut ? 'rotate(180deg)' : undefined }} aria-hidden="true" />
             </motion.button>
-            {showSoldOut && <section id="sold-out-products" aria-label="Out-of-stock snacks" className="sold-out-catalog">
-              <div className="sold-out-heading"><h3>Out of stock{tab !== 'all' ? ` · ${tab.charAt(0).toUpperCase() + tab.slice(1)}` : ''}</h3><p>Missing a favourite? Request a restock from the shop.</p></div>
+            {showSoldOut && <section ref={soldOutSectionRef} id="sold-out-products" aria-label="Out-of-stock snacks" className="sold-out-catalog">
+              <div className="sold-out-heading"><h3>Out of stock{tab !== 'all' ? ` · ${tab.charAt(0).toUpperCase() + tab.slice(1)}` : ''}{!soldOutLoading && !soldOutError ? ` (${filteredSoldOut.length})` : ''}</h3><p>Missing a favourite? Request a restock from the shop.</p></div>
               {soldOutError ? <p className="shop-notice" role="alert">We couldn't load out-of-stock items. Hide and reopen this section to try again.</p> : <>
                 <div className="products-grid" aria-busy={soldOutLoading}>
                   {soldOutLoading ? <><ProductSkeleton /><ProductSkeleton /><span className="sr-only" role="status">Loading out-of-stock snacks…</span></> : filteredSoldOut.map(p => <ProductCard key={p.id} product={p} onRequestRestock={requestRestock} restockStatus={restockStatuses[p.id]} />)}
                 </div>
-                {!soldOutLoading && filteredSoldOut.length === 0 && <p className="sold-out-empty" role="status">{hasSearchQuery ? 'No out-of-stock items match your search in this section.' : 'No out-of-stock items in this section.'}</p>}
+                {!soldOutLoading && filteredSoldOut.length === 0 && <p className="sold-out-empty" role="status">{hasSearchQuery ? 'No out-of-stock items match your search.' : tab !== 'all' ? 'No out-of-stock items in this category.' : 'No out-of-stock items.'}{soldOutProducts.length > 0 && (hasSearchQuery || tab !== 'all') && <button type="button" onClick={() => { setQuery(''); setTab('all') }}>Show all out-of-stock items</button>}</p>}
               </>}
             </section>}
           </div>
@@ -183,7 +192,7 @@ export function ShopView({ products, loading = false, error, soldOutProducts = [
 function LiveShop() {
   const [tab, setTab] = useState('all')
   const [showSoldOut, setShowSoldOut] = useState(false)
-  const { products, loading, error, refreshProducts, soldOutProducts, soldOutLoading, soldOutError } = useProducts({ includeSoldOut: showSoldOut, category: tab })
+  const { products, loading, error, refreshProducts, soldOutProducts, soldOutLoading, soldOutError } = useProducts({ includeSoldOut: showSoldOut })
   const { profile, user } = useAuth()
   const [shopOpen, setShopOpen] = useState(true)
   const { unreadCount, markRequestUpdatesRead } = useRequestUpdateBadge(user?.uid)
