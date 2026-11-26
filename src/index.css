@@ -644,7 +644,6 @@ textarea::placeholder {
 .hero-copy h1 { font-size: clamp(40px, 5vw, 68px); font-weight: 800; letter-spacing: -.055em; line-height: 1.07; margin: 22px 0; text-wrap: balance; }
 .hero-copy h1 span { color: var(--accent-ink); }
 .hero-copy p { color: var(--text-secondary); font-size: 14px; line-height: 1.8; }
-.pickup-announcement { display: flex; align-items: center; justify-content: center; width: min(100%, 620px); min-height: 82px; margin-top: 30px; padding: 16px 24px; border: 5px solid #fff; border-radius: 16px; outline: 5px solid #e31717; background: linear-gradient(135deg, #17432f, #102c22); box-shadow: 0 8px 22px #102b2126; color: #fff; font-family: Impact, 'Arial Narrow', sans-serif; font-size: clamp(22px, 3vw, 32px); line-height: 1.15; letter-spacing: .025em; text-align: center; text-transform: uppercase; }
 
 .catalog-section { padding-top: 39px; }
 .catalog-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }

@@ -132,7 +132,6 @@ export function ShopView({ products, loading = false, error, soldOutProducts = [
             </div>
             <h1>The good stuff.<br /><span>On your time.</span></h1>
             <p>A little salty. A little sweet. Your everyday favourites,<br className="desktop-break" /> for noon cravings and midnight munchies.</p>
-            <div className="pickup-announcement" role="note">Pickup continue after 1 am</div>
           </div>
         </motion.section>
         {!shopOpen && <p className="shop-notice">You can still place an order. Pickup will be available when the shop reopens.</p>}
